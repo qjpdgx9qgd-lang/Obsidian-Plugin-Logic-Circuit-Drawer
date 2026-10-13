@@ -1,0 +1,645 @@
+import { build } from 'esbuild';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir, homedir } from 'node:os';
+import { join } from 'node:path';
+import { createServer } from 'node:http';
+import assert from 'node:assert/strict';
+import { chromium } from '@playwright/test';
+
+const directory = await mkdtemp(join(tmpdir(), 'logic-circuit-ui-'));
+await build({ entryPoints: ['tests/ui-harness.tsx'], bundle: true, platform: 'browser', outfile: join(directory, 'app.js'), define: { 'process.env.NODE_ENV': '"development"' }, logLevel: 'warning' });
+const stylesheet = await readFile('styles.css', 'utf8');
+await writeFile(join(directory, 'styles.css'), stylesheet);
+await writeFile(join(directory, 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="styles.css"><style>
+body { margin: 0; padding: 36px; font: 15px system-ui; --font-interface: system-ui; --font-text: system-ui; --text-normal:#25304a; --text-muted:#717b8f; --background-primary:#fff; --background-secondary:#f4f5f8; --background-modifier-border:#dce0e8; --interactive-accent:#6857d9; --text-on-accent:#fff; --interactive-normal:#f4f5f8; --interactive-hover:#e9ebf2; }
+body.theme-dark { background:#181b22; --text-normal:#e2e5ee; --text-muted:#a3adbf; --background-primary:#222731; --background-secondary:#1a1f28; --background-modifier-border:#414a5b; --interactive-accent:#a899fc; --text-on-accent:#161421; --interactive-normal:#2d3442; --interactive-hover:#394254; }
+#circuit { max-width: 850px; margin: auto; } .tail { height: 1200px; padding-top: 24px; }
+.cm-embed-block { position: relative; } .embed-actions { position: absolute; top: 0; right: 0; }
+.markdown-rendered div:empty { display: none; }
+button { font: inherit; color: inherit; cursor:pointer; } button:disabled { cursor:default; opacity:.4; }
+</style></head><body class="theme-light"><div class="markdown-source-view mod-cm6"><div class="cm-content" contenteditable="true"><div class="cm-embed-block cm-lang-logic-circuit markdown-rendered" contenteditable="false"><div id="circuit"></div><div class="embed-actions"><button title="Edit this block" aria-label="Obsidian circuit block editor">Edit</button></div></div><div class="cm-embed-block" contenteditable="false"><pre>Unrelated code block</pre><div class="embed-actions"><button title="Edit this block" aria-label="Obsidian other block editor">Edit</button></div></div></div></div><div class="tail"><label>Surrounding note text <input aria-label="Surrounding note text" value="Markdown outside the circuit"></label></div><script src="app.js"></script></body></html>`);
+const server = createServer((request, response) => {
+	const file = request.url === '/' ? 'index.html' : request.url?.slice(1);
+	if (!['index.html', 'app.js', 'styles.css'].includes(file)) { response.writeHead(404).end(); return; }
+	void readFile(join(directory, file)).then(data => {
+		response.setHeader('Content-Type', file.endsWith('.css') ? 'text/css' : file.endsWith('.js') ? 'text/javascript' : 'text/html');
+		response.end(data);
+	}).catch(() => response.writeHead(500).end());
+});
+await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+const address = server.address();
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH || join(homedir(), 'Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing');
+let browser;
+let page;
+try {
+	browser = await chromium.launch({ executablePath, headless: true });
+	page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+	page.setDefaultTimeout(10000);
+	const errors = [];
+	page.on('pageerror', error => errors.push(error.message));
+	await page.goto(`http://127.0.0.1:${address.port}/`);
+	const block = page.locator('.logic-circuit');
+	const controls = page.locator('.logic-block-controls');
+	const waitControlsOpacity = opacity => page.waitForFunction(opacity => {
+		const controls = document.querySelector('.logic-block-controls');
+		return controls && Number(getComputedStyle(controls).opacity) === opacity;
+	}, opacity);
+	const leaveBlock = async () => {
+		await page.getByRole('textbox', { name: 'Surrounding note text' }).focus();
+		await page.mouse.move(8, 8);
+		await waitControlsOpacity(0);
+	};
+	await page.mouse.move(8, 8);
+	await waitControlsOpacity(0);
+	assert.equal(await controls.evaluate(element => getComputedStyle(element).pointerEvents), 'none', 'hidden controls must not intercept pointer actions');
+	await block.hover();
+	await waitControlsOpacity(1);
+	assert.equal(await page.getByRole('button', { name: 'Obsidian circuit block editor', exact: true }).isVisible(), false, 'hide the host edit overlay for this circuit');
+	assert.equal(await page.getByRole('button', { name: 'Obsidian other block editor', exact: true }).isVisible(), true, 'keep unrelated code-block edit controls');
+	await leaveBlock();
+	await page.getByRole('button', { name: 'Obsidian other block editor', exact: true }).focus();
+	await page.keyboard.press('Shift+Tab');
+	await waitControlsOpacity(1);
+	assert.equal(await page.getByRole('button', { name: 'Edit', exact: true }).evaluate(element => element === document.activeElement), true, 'keyboard focus reveals the controls when entered from the following block');
+	await block.focus();
+	await page.keyboard.press('Tab');
+	assert.equal(await page.getByRole('button', { name:'Decrease circuit scale', exact:true }).evaluate(element => element === document.activeElement), true, 'scale controls remain reachable from keyboard focus');
+	await page.mouse.move(8, 8);
+	await waitControlsOpacity(1);
+	await leaveBlock();
+	await block.hover();
+	await page.getByRole('button', { name: 'Edit', exact: true }).click();
+	await page.getByRole('button', { name: 'Done', exact: true }).waitFor();
+	const deleteSelected = page.getByRole('button', { name: 'Delete selected elements', exact: true });
+	assert.equal(await deleteSelected.isEnabled(), false, 'the delete button is disabled without a selection');
+	const data = () => page.evaluate(() => window.circuitTest.data());
+	const waitNodes = count => page.waitForFunction(count => window.circuitTest.data().nodes.length === count, count);
+	const place = async (type, x, y, count) => {
+		await page.getByRole('button', { name: `Place ${type}`, exact: true }).click();
+		const canvas = await page.locator('.logic-canvas').boundingBox();
+		await page.mouse.move(canvas.x + x, canvas.y + Math.min(y, canvas.height - 2));
+		await page.mouse.move(canvas.x + x, canvas.y + y, { steps: 12 });
+		await page.locator('.logic-placement-preview:not(.is-invalid)').waitFor();
+		await page.mouse.click(canvas.x + x, canvas.y + y);
+		await waitNodes(count);
+		assert.equal(await page.getByRole('button', { name: `Place ${type}`, exact: true }).getAttribute('aria-pressed'), 'false');
+	};
+	const pin = (nodeId, pinId) => page.locator(`[data-circuit-node="${nodeId}"][data-circuit-pin="${pinId}"]`);
+	const center = async locator => { const box = await locator.boundingBox(); assert.ok(box); return { x: box.x + box.width / 2, y: box.y + box.height / 2 }; };
+	const drag = async (from, to) => {
+		await page.mouse.move(from.x, from.y);
+		await page.mouse.down();
+		await page.mouse.move(to.x, to.y, { steps: 12 });
+		await page.mouse.up();
+	};
+	const connectPins = async (source, target) => {
+		const from = await center(source);
+		const endpoints = await Promise.all([source, target].map(async locator => ({
+			node: await locator.getAttribute('data-circuit-node'), pin: await locator.getAttribute('data-circuit-pin'),
+		})));
+		await page.mouse.move(from.x, from.y);
+		await page.mouse.down();
+		await page.mouse.move(from.x + 4, from.y, { steps:2 });
+		await page.locator('[data-circuit-connection-preview="true"]').waitFor();
+		await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+		// Beginning a new action can dismiss the preceding inline notice.
+		// Follow the live target after that layout update, as a user does.
+		const to = await center(target);
+		await page.mouse.move(to.x, to.y, { steps: 12 });
+		await page.locator('[data-circuit-connection-preview="true"]').waitFor();
+		const previewGaps = await page.evaluate(endpoints => {
+			const path = document.querySelector('[data-circuit-connection-preview="true"]');
+			return endpoints.map((endpoint, index) => {
+				const lead = document.querySelector(`[data-id="${endpoint.node}"] [data-circuit-connector="${endpoint.pin}"]`);
+				const point = path.getPointAtLength(index === 0 ? 0 : path.getTotalLength());
+				const position = new DOMPoint(point.x, point.y).matrixTransform(path.getScreenCTM());
+				const leadPoint = lead.getPointAtLength(endpoint.pin === 'out' ? lead.getTotalLength() : 0);
+				const symbolPoint = new DOMPoint(leadPoint.x, leadPoint.y).matrixTransform(lead.getScreenCTM());
+				return Math.hypot(position.x - symbolPoint.x, position.y - symbolPoint.y);
+			});
+		}, endpoints);
+		assert.ok(previewGaps.every(gap => gap <= .5), `dragged connection preview must touch both symbol endpoints: ${JSON.stringify(previewGaps)}`);
+		await page.mouse.up();
+	};
+	await place('Input', 130, 70, 1);
+	await place('Input', 130, 170, 2);
+	await place('AND', 350, 110, 3);
+	await place('Output', 650, 110, 4);
+	let model = await data();
+	const [inputA, inputB] = model.nodes.filter(node => node.type === 'input');
+	const gate = model.nodes.find(node => node.type === 'and');
+	const output = model.nodes.find(node => node.type === 'output');
+	await page.locator(`[data-id="${inputA.id}"] .logic-terminal-label`).dblclick();
+	await page.getByRole('textbox', { name: 'Edit input label' }).fill('Enable');
+	await page.getByRole('textbox', { name: 'Edit input label' }).press('Enter');
+	assert.equal((await data()).nodes.find(node => node.id === inputA.id).label, 'Enable');
+	await connectPins(pin(inputA.id, 'out'), pin(gate.id, 'in-1'));
+	await page.waitForFunction(() => window.circuitTest.data().edges.length === 1);
+	await connectPins(pin(gate.id, 'in-2'), pin(inputB.id, 'out'));
+	await page.waitForFunction(() => window.circuitTest.data().edges.length === 2);
+	await connectPins(pin(gate.id, 'out'), pin(output.id, 'in-1'));
+	await page.waitForFunction(() => window.circuitTest.data().edges.length === 3);
+	const assertContinuousWires = async () => {
+		await page.waitForFunction(() => window.circuitTest.data().edges.every(edge => document.querySelector(`path[data-circuit-edge="${edge.id}"]`)));
+		// Controlled React Flow nodes measure newly restored handles on the next frame.
+		await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+		const gaps = await page.evaluate(() => {
+			const circuit = window.circuitTest.data();
+			return circuit.edges.flatMap(edge => {
+				const path = document.querySelector(`path[data-circuit-edge="${edge.id}"]`);
+				const coordinates = [path.getPointAtLength(0), path.getPointAtLength(path.getTotalLength())];
+				return [
+					{ node: edge.sourceNodeId, pin: edge.sourcePinId },
+					{ node: edge.targetNodeId, pin: edge.targetPinId },
+				].map((endpoint, index) => {
+					const position = new DOMPoint(coordinates[index].x, coordinates[index].y).matrixTransform(path.getScreenCTM());
+					const node = circuit.nodes.find(node => node.id === endpoint.node);
+					if (node.type === 'junction') {
+						const dot = document.querySelector(`[data-id="${endpoint.node}"] .logic-junction-dot`);
+						const box = dot.getBoundingClientRect();
+						return { edge: edge.id, endpoint, anchorVisible: box.width > 0 && box.height > 0, handleGap: 0, symbolGap: Math.hypot(position.x - box.x - box.width / 2, position.y - box.y - box.height / 2) };
+					}
+					const handle = document.querySelector(`[data-circuit-node="${endpoint.node}"][data-circuit-pin="${endpoint.pin}"]`);
+					const box = handle.getBoundingClientRect();
+					const target = { x: index === 0 ? box.right : box.left, y: box.y + box.height / 2 };
+					const lead = document.querySelector(`[data-id="${endpoint.node}"] [data-circuit-connector="${endpoint.pin}"]`);
+					const leadPoint = lead.getPointAtLength(index === 0 ? lead.getTotalLength() : 0);
+					const symbolPoint = new DOMPoint(leadPoint.x, leadPoint.y).matrixTransform(lead.getScreenCTM());
+					return { edge: edge.id, endpoint, anchorVisible: box.width > 0 && box.height > 0 && getComputedStyle(handle).display !== 'none', handleGap: Math.hypot(position.x - target.x, position.y - target.y), symbolGap: Math.hypot(position.x - symbolPoint.x, position.y - symbolPoint.y) };
+				});
+			});
+		});
+		assert.ok(gaps.every(item => item.anchorVisible && item.handleGap <= .5 && item.symbolGap <= .5), `wire endpoints must touch their pin anchors and symbol leads: ${JSON.stringify(gaps)}`);
+	};
+	await assertContinuousWires();
+	model = await data();
+	assert.ok(model.edges.some(edge => edge.sourceNodeId === inputB.id && edge.targetPinId === 'in-2'));
+	const previousPosition = model.nodes.find(node => node.id === gate.id).position;
+	const beforeDragWrites = await page.evaluate(() => window.circuitTest.writes());
+	const gateCenter = await center(page.locator('.logic-object-and'));
+	await page.mouse.move(gateCenter.x, gateCenter.y);
+	await page.mouse.down();
+	await page.mouse.move(gateCenter.x + 32, gateCenter.y + 32, { steps: 12 });
+	assert.equal(await page.evaluate(() => window.circuitTest.writes()), beforeDragWrites, 'pointer moves must not write');
+	await page.mouse.up();
+	await page.waitForFunction(({ id, x }) => window.circuitTest.data().nodes.find(node => node.id === id).position.x !== x, { id: gate.id, x: previousPosition.x });
+	assert.equal((await data()).edges.length, 3);
+	await page.getByRole('button', { name: 'Undo circuit edit' }).click();
+	assert.deepEqual((await data()).nodes.find(node => node.id === gate.id).position, previousPosition);
+	await page.getByRole('button', { name: 'Redo circuit edit' }).click();
+	await place('Output', 650, 210, 5);
+	const branchOutput = (await data()).nodes.filter(node => node.type === 'output')[1];
+	const outgoing = (await data()).edges.find(edge => edge.sourceNodeId === gate.id);
+	const wirePoint = async edgeId => page.locator(`path[data-circuit-edge="${edgeId}"]`).evaluate(path => {
+		const point = path.getPointAtLength(path.getTotalLength() * .25);
+		const screen = new DOMPoint(point.x, point.y).matrixTransform(path.getScreenCTM());
+		return { x: screen.x, y: screen.y };
+	});
+	await drag(await center(pin(branchOutput.id, 'in-1')), await wirePoint(outgoing.id));
+	await waitNodes(6);
+	assert.equal((await data()).edges.length, 5);
+	assert.equal((await data()).nodes.filter(node => node.type === 'junction').length, 1);
+	await page.getByRole('button', { name: 'Undo circuit edit' }).click();
+	await waitNodes(5);
+	assert.equal((await data()).edges.length, 3);
+	await page.getByRole('button', { name: 'Redo circuit edit' }).click();
+	await waitNodes(6);
+	await place('Output', 650, 245, 7);
+	const nextOutput = (await data()).nodes.filter(node => node.type === 'output')[2];
+	const trunk = (await data()).edges.find(edge => edge.sourceNodeId === gate.id);
+	const point = await wirePoint(trunk.id);
+	await page.mouse.move(point.x, point.y);
+	await page.locator('.logic-branch-handle').waitFor();
+	await drag(await center(page.locator('.logic-branch-handle')), await center(pin(nextOutput.id, 'in-1')));
+	await page.waitForFunction(() => window.circuitTest.data().edges.length === 7);
+	assert.equal((await data()).nodes.filter(node => node.type === 'junction').length, 2);
+	const beforeJunctionMove = await data();
+	const junction = beforeJunctionMove.nodes.find(node => node.type === 'junction');
+	const junctionDot = page.locator(`[data-id="${junction.id}"] .logic-junction-dot`);
+	const junctionCenter = await center(junctionDot);
+	await drag(junctionCenter, { x: junctionCenter.x + 16, y: junctionCenter.y + 16 });
+	await page.waitForFunction(({ id, x }) => window.circuitTest.data().nodes.find(node => node.id === id).position.x !== x, { id: junction.id, x: junction.position.x });
+	for (const node of beforeJunctionMove.nodes.filter(node => node.id !== junction.id)) {
+		assert.deepEqual((await data()).nodes.find(item => item.id === node.id).position, node.position, 'moving a junction must not move other objects');
+	}
+	await junctionDot.click();
+	await page.keyboard.press('Delete');
+	await page.waitForFunction(id => !window.circuitTest.data().nodes.some(node => node.id === id), junction.id);
+	for (const terminal of (await data()).nodes.filter(node => node.type === 'output')) {
+		assert.ok((await data()).edges.some(edge => edge.targetNodeId === terminal.id), 'junction deletion preserves downstream connections');
+	}
+	await page.getByRole('button', { name: 'Undo circuit edit' }).click();
+	await page.waitForFunction(id => window.circuitTest.data().nodes.some(node => node.id === id), junction.id);
+	const branchWire = (await data()).edges.find(edge => edge.targetNodeId === nextOutput.id);
+	const selectPoint = await wirePoint(branchWire.id);
+	await page.mouse.click(selectPoint.x, selectPoint.y);
+	await page.keyboard.press('Delete');
+	await page.waitForFunction(id => !window.circuitTest.data().edges.some(edge => edge.id === id), branchWire.id);
+	assert.ok((await data()).nodes.some(node => node.id === nextOutput.id), 'wire deletion keeps its terminal');
+	await page.getByRole('button', { name: 'Undo circuit edit' }).click();
+	await page.waitForFunction(id => window.circuitTest.data().edges.some(edge => edge.id === id), branchWire.id);
+	await page.locator(`[data-id="${branchOutput.id}"] .logic-terminal-label`).click();
+	await page.keyboard.press('Backspace');
+	await page.waitForFunction(id => !window.circuitTest.data().nodes.some(node => node.id === id), branchOutput.id);
+	assert.ok(!(await data()).edges.some(edge => edge.sourceNodeId === branchOutput.id || edge.targetNodeId === branchOutput.id));
+	await page.getByRole('button', { name: 'Undo circuit edit' }).click();
+	await page.waitForFunction(id => window.circuitTest.data().nodes.some(node => node.id === id), branchOutput.id);
+	const beforeDrop = (await data()).nodes.length;
+	await page.getByRole('button', { name: 'Place OR', exact: true }).dragTo(page.locator('.logic-canvas'), { targetPosition: { x: 130, y: 250 } });
+	await waitNodes(beforeDrop + 1);
+	assert.equal(await page.getByRole('button', { name: 'Place OR', exact: true }).getAttribute('aria-pressed'), 'false');
+	const placedOr = (await data()).nodes.find(node => node.type === 'or');
+	await page.locator(`[data-id="${placedOr.id}"] .logic-object-or`).click();
+	assert.equal(await deleteSelected.isEnabled(), true, 'selecting a node enables the delete button');
+	await page.keyboard.press('Delete');
+	await page.waitForFunction(id => !window.circuitTest.data().nodes.some(node => node.id === id), placedOr.id);
+	await page.getByRole('button', { name: 'Undo circuit edit' }).click();
+	await page.waitForFunction(id => window.circuitTest.data().nodes.some(node => node.id === id), placedOr.id);
+	await page.locator(`[data-id="${placedOr.id}"] .logic-object-or`).click();
+	await deleteSelected.click();
+	await page.waitForFunction(id => !window.circuitTest.data().nodes.some(node => node.id === id), placedOr.id);
+	await page.getByRole('button', { name: 'Undo circuit edit' }).click();
+	await page.waitForFunction(id => window.circuitTest.data().nodes.some(node => node.id === id), placedOr.id);
+	await assertContinuousWires();
+	await page.locator(`[data-id="${gate.id}"] .logic-object-and`).click();
+	await page.mouse.move(8, 8);
+	await waitControlsOpacity(0);
+	assert.equal(await block.evaluate(element => element.contains(document.activeElement)), true, 'mouse selection keeps circuit keyboard handling focused');
+	await block.hover();
+	await waitControlsOpacity(1);
+	const scaleInput = page.getByRole('textbox', { name: 'Circuit scale percentage', exact: true });
+	const setScale = async value => {
+		await scaleInput.fill(value);
+		await scaleInput.press('Enter');
+	};
+	await setScale('50');
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === .5);
+	assert.equal(await scaleInput.inputValue(), '50');
+	await assertContinuousWires();
+	await setScale('89.2');
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === .892);
+	await page.getByRole('button', { name: 'Increase circuit scale', exact: true }).click();
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === .9);
+	assert.equal(await scaleInput.inputValue(), '90', 'plus rounds an arbitrary percentage to the next ten-point step');
+	await page.getByRole('button', { name: 'Decrease circuit scale', exact: true }).click();
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === .8);
+	assert.equal(await scaleInput.inputValue(), '80', 'minus moves to the previous ten-point step');
+	await setScale('89.2');
+	await page.getByRole('button', { name: 'Decrease circuit scale', exact: true }).click();
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === .8);
+	assert.equal(await scaleInput.inputValue(), '80', 'minus from an arbitrary percentage rounds downward');
+	await setScale('50');
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === .5);
+	const beforeInvalidScale = await data();
+	const beforeInvalidWrites = await page.evaluate(() => window.circuitTest.writes());
+	for (const invalid of ['abc', '24', '301']) {
+		await setScale(invalid);
+		assert.equal(await scaleInput.getAttribute('aria-invalid'), 'true');
+		assert.deepEqual(await data(), beforeInvalidScale, 'invalid scale entry must not change the diagram');
+		assert.equal(await page.evaluate(() => window.circuitTest.writes()), beforeInvalidWrites, 'invalid scale entry must not save');
+		await scaleInput.press('Escape');
+		assert.equal(await scaleInput.inputValue(), '50', 'Escape restores the effective percentage');
+		assert.notEqual(await scaleInput.getAttribute('aria-invalid'), 'true');
+	}
+	await scaleInput.fill('75');
+	await scaleInput.press('Escape');
+	assert.equal((await data()).view.preferredScale, .5, 'Escape cancels a valid uncommitted percentage');
+	assert.equal(await scaleInput.inputValue(), '50');
+	await page.locator(`[data-id="${gate.id}"] .logic-object-and`).click();
+	assert.equal(await deleteSelected.isEnabled(), true);
+	const beforeFieldDelete = (await data()).nodes.length;
+	await scaleInput.fill('50');
+	await scaleInput.press('ControlOrMeta+A');
+	await scaleInput.press('Delete');
+	assert.equal((await data()).nodes.length, beforeFieldDelete, 'Delete in the percentage field must not delete the selected gate');
+	await scaleInput.press('Escape');
+	await scaleInput.fill('60');
+	await page.getByRole('button', { name: 'Fit', exact: true }).focus();
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === .6);
+	assert.equal(await scaleInput.inputValue(), '60', 'blur commits a valid percentage');
+	await setScale('300');
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale !== .6);
+	const cappedScale = (await data()).view.preferredScale;
+	assert.ok(cappedScale < 3, 'typed enlargement is capped to the available block width');
+	assert.equal(await scaleInput.inputValue(), String(Math.round(cappedScale * 1000) / 10));
+	assert.equal(await page.getByRole('button', { name: 'Increase circuit scale', exact: true }).isEnabled(), false);
+	await assertContinuousWires();
+	await setScale('50%');
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === .5);
+	await assertContinuousWires();
+	console.log('Passed: draggable/selectable junctions, connectivity-preserving junction deletion, wire/node deletion, toolbar drag-and-drop.');
+	console.log('Passed: placement, labels, reversed connections, movement/save boundaries, both branch gestures, undo/redo.');
+	console.log('Passed: hover/focus controls, keyboard node deletion, selection-aware trash button, and continuous wire endpoints.');
+	console.log('Passed: typed percentages, Enter/blur saves, invalid percentages, Escape cancellation, and text-field shortcut isolation.');
+	await page.screenshot({ path: join(directory, 'editor-light.png'), fullPage: false });
+	await page.evaluate(() => { document.body.className = 'theme-dark'; });
+	await page.screenshot({ path: join(directory, 'editor-dark.png'), fullPage: false });
+	await page.getByRole('button', { name: 'Fit', exact: true }).click();
+	await page.getByRole('button', { name: 'Done', exact: true }).click();
+	await page.getByRole('button', { name: 'Edit', exact: true }).waitFor();
+	await leaveBlock();
+	await block.hover();
+	await waitControlsOpacity(1);
+	const saved = await data();
+	await page.evaluate(() => window.circuitTest.remount());
+	await page.getByRole('button', { name: 'Edit', exact: true }).waitFor();
+	assert.deepEqual(await data(), saved, 'saved diagram survives remount');
+	const fullWidth = await page.locator('.logic-canvas').boundingBox();
+	await page.setViewportSize({ width: 430, height: 900 });
+	await page.waitForFunction(() => document.querySelector('.logic-canvas').getBoundingClientRect().width < 400);
+	await page.waitForFunction(() => {
+		const canvas = document.querySelector('.logic-canvas').getBoundingClientRect();
+		return [...document.querySelectorAll('.logic-object')].every(node => {
+			const box = node.getBoundingClientRect();
+			return box.left >= canvas.left && box.right <= canvas.right + 1;
+		});
+	});
+	const canvasBox = await page.locator('.logic-canvas').boundingBox();
+	assert.ok(canvasBox.width < fullWidth.width);
+	const nodeBoxes = await page.locator('.logic-object').evaluateAll(nodes => nodes.map(node => { const box = node.getBoundingClientRect(); return { left: box.left, right: box.right }; }));
+	assert.ok(nodeBoxes.every(box => box.left >= canvasBox.x && box.right <= canvasBox.x + canvasBox.width + 1), 'all symbols fit horizontally');
+	assert.equal((await data()).view.preferredScale, saved.view.preferredScale, 'responsive fitting must not replace preference');
+	await assertContinuousWires();
+	await page.screenshot({ path: join(directory, 'finished-narrow.png'), fullPage: false });
+	await page.mouse.move(canvasBox.x + 50, canvasBox.y + 50);
+	await page.mouse.wheel(0, 400);
+	await page.waitForFunction(() => window.scrollY > 0);
+	assert.ok((await page.evaluate(() => window.circuitTest.markdown())).startsWith('Before circuit\n\n'));
+	assert.ok((await page.evaluate(() => window.circuitTest.markdown())).endsWith('\n\nAfter circuit'));
+	console.log('Passed: light/dark rendering, Fit, Done, persisted reopening, responsive full visibility, ordinary note scrolling.');
+	await page.evaluate(() => window.scrollTo(0, 0));
+	await page.setViewportSize({ width: 1100, height: 900 });
+	await block.hover();
+	await waitControlsOpacity(1);
+	await page.getByRole('button', { name: 'Edit', exact: true }).click();
+	await page.getByRole('button', { name: 'Done', exact: true }).waitFor();
+	const externallyChanged = await page.evaluate(() => { window.circuitTest.conflict(); return window.circuitTest.markdown(); });
+	await page.getByRole('button', { name: 'Decrease circuit scale', exact: true }).click();
+	await page.getByRole('button', { name: 'Reload from note', exact: true }).waitFor();
+	assert.equal(await page.evaluate(() => window.circuitTest.markdown()), externallyChanged, 'conflict must preserve external note contents');
+	assert.ok(await page.getByRole('button', { name: 'Copy draft', exact: true }).isVisible());
+	await page.getByRole('textbox', { name:'Surrounding note text' }).click();
+	await page.waitForTimeout(4250);
+	assert.equal(await page.getByRole('button', { name:'Reload from note', exact:true }).isVisible(), true, 'conflicted saving errors remain actionable after the transient message interval');
+	assert.equal(await page.evaluate(() => window.circuitTest.snapshot().editing), true, 'an outside click preserves the conflicted editing draft');
+	assert.equal(await page.evaluate(() => window.circuitTest.markdown()), externallyChanged);
+	await block.hover();
+	await page.getByRole('button', { name: 'Reload from note', exact: true }).click();
+	await page.getByRole('button', { name: 'Edit', exact: true }).waitFor();
+	assert.equal((await data()).view.preferredScale, JSON.parse(externallyChanged.match(/```logic-circuit\n([\s\S]*?)\n```/)[1]).view.preferredScale);
+	console.log('Passed: inline conflict feedback, preserved external Markdown, and explicit reload recovery.');
+	await page.evaluate(() => window.circuitTest.showAllGates());
+	await page.waitForFunction(() => document.querySelectorAll('path[data-circuit-edge]').length === 20);
+	await assertContinuousWires();
+	const alignment = await page.evaluate(() => {
+		const grid = window.circuitTest.grid();
+		const paths = [...document.querySelectorAll('path[data-circuit-edge]')];
+		const inverse = paths[0].getScreenCTM().inverse();
+		return {
+			grid,
+			pins: paths.flatMap(path => [path.getPointAtLength(0), path.getPointAtLength(path.getTotalLength())].map(point => ({ x: point.x, y: point.y }))),
+			centers: [...document.querySelectorAll('.logic-object')].map(node => {
+				const marker = node.querySelector('.logic-terminal-marker circle');
+				if (marker) {
+					const point = new DOMPoint(marker.cx.baseVal.value, marker.cy.baseVal.value).matrixTransform(marker.getScreenCTM()).matrixTransform(inverse);
+					return { x: point.x, y: point.y };
+				}
+				const box = node.getBoundingClientRect();
+				const point = new DOMPoint(box.x + box.width / 2, box.y + box.height / 2).matrixTransform(inverse);
+				return { x: point.x, y: point.y };
+			}),
+			horizontal: paths.every(path => {
+				const startY = path.getPointAtLength(0).y;
+				return [.25, .5, .75, 1].every(fraction => Math.abs(path.getPointAtLength(path.getTotalLength() * fraction).y - startY) < .01);
+			}),
+		};
+	});
+	assert.ok([...alignment.pins, ...alignment.centers].every(point => [point.x, point.y].every(value => Math.abs(value / alignment.grid - Math.round(value / alignment.grid)) < .001)), `every pin and visual center shares the placement grid: ${JSON.stringify(alignment)}`);
+	assert.equal(alignment.horizontal, true, 'input/output terminals can align exactly with each gate input and output without wire doglegs');
+	const terminalLayout = await page.locator('.logic-object-input, .logic-object-output').evaluateAll(terminals => terminals.map(terminal => {
+		const label = terminal.querySelector('.logic-terminal-body');
+		const marker = terminal.querySelector('.logic-terminal-marker');
+		return { labelBottom: label.getBoundingClientRect().bottom, markerTop: marker.getBoundingClientRect().top, labelBorder: getComputedStyle(label).borderTopWidth };
+	}));
+	assert.ok(terminalLayout.every(item => item.labelBottom < item.markerTop && item.labelBorder === '0px'), 'terminal labels sit above a small marker without an enclosing rectangle');
+	await block.hover();
+	await page.getByRole('button', { name: 'Edit', exact: true }).click();
+	await page.getByRole('button', { name: 'Done', exact: true }).waitFor();
+	await setScale('50');
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === .5);
+	await assertContinuousWires();
+	await setScale('150');
+	await page.waitForFunction(() => window.circuitTest.data().view.preferredScale === 1.5);
+	await assertContinuousWires();
+	await page.screenshot({ path: join(directory, 'all-symbols-dark.png'), fullPage: true });
+	await page.evaluate(() => { document.body.className = 'theme-light'; });
+	await page.screenshot({ path: join(directory, 'all-symbols-light.png'), fullPage: true });
+	console.log('Passed: exact wire-to-symbol continuity for all seven gate types at 50%, 100%, and 150%.');
+	await page.evaluate(() => window.circuitTest.showCardinalJunction());
+	await page.waitForFunction(() => document.querySelectorAll('path[data-circuit-edge]').length === 4);
+	await assertContinuousWires();
+	assert.equal(await page.locator('.logic-junction-stub').count(), 0, 'a junction has no fixed connector stubs');
+	const junctionDirections = await page.evaluate(() => {
+		const sides = ['left', 'right', 'top', 'bottom'];
+		return Object.fromEntries(sides.map(side => {
+			const path = document.querySelector(`path[data-circuit-edge="junction-${side}-wire"]`);
+			const length = path.getTotalLength();
+			const origin = path.getPointAtLength(side === 'left' ? length : 0);
+			const near = path.getPointAtLength(side === 'left' ? length - 1 : 1);
+			return [side, { x: near.x - origin.x, y: near.y - origin.y }];
+		}));
+	});
+	assert.ok(junctionDirections.left.x < -.9 && Math.abs(junctionDirections.left.y) < .01, 'the incoming wire meets the left of the dot');
+	assert.ok(junctionDirections.right.x > .9 && Math.abs(junctionDirections.right.y) < .01, 'the horizontal branch leaves the right of the dot');
+	assert.ok(junctionDirections.top.y < -.9 && Math.abs(junctionDirections.top.x) < .01, 'the upward branch leaves the top of the dot');
+	assert.ok(junctionDirections.bottom.y > .9 && Math.abs(junctionDirections.bottom.x) < .01, 'the downward branch leaves the bottom of the dot');
+	await block.hover();
+	await page.getByRole('button', { name: 'Edit', exact: true }).click();
+	await page.getByRole('button', { name: 'Done', exact: true }).waitFor();
+	const junctionSides = await page.locator('[data-id="cardinal-junction"] .logic-junction-pin').evaluateAll(handles => handles.map(handle => handle.getAttribute('data-circuit-side')).sort());
+	assert.deepEqual(junctionSides, ['bottom', 'left', 'right', 'top'], 'editing exposes a connection target on every side of the junction');
+	await place('Output', 650, 90, 6);
+	const sideOutput = (await data()).nodes.at(-1);
+	await drag(await center(pin('cardinal-junction', 'junction-top')), await center(pin(sideOutput.id, 'in-1')));
+	await page.waitForFunction(() => window.circuitTest.data().edges.length === 5);
+	assert.ok((await data()).edges.some(edge => edge.sourceNodeId === 'cardinal-junction' && edge.sourcePinId === 'out' && edge.targetNodeId === sideOutput.id), 'a cardinal editor handle saves the stable logical output pin');
+	await place('Output', 650, 310, 7);
+	const reverseSideOutput = (await data()).nodes.at(-1);
+	await drag(await center(pin(reverseSideOutput.id, 'in-1')), await center(pin('cardinal-junction', 'junction-bottom')));
+	await page.waitForFunction(() => window.circuitTest.data().edges.length === 6);
+	assert.ok((await data()).edges.some(edge => edge.sourceNodeId === 'cardinal-junction' && edge.sourcePinId === 'out' && edge.targetNodeId === reverseSideOutput.id), 'a reversed drag onto a cardinal junction handle preserves the connection direction');
+	await assertContinuousWires();
+	console.log('Passed: grid-aligned centers and all pins, straight aligned connections, and junction routing on all four sides.');
+	await page.evaluate(() => window.circuitTest.showMyTestCircuit());
+	await page.waitForFunction(() => document.querySelectorAll('path[data-circuit-edge]').length === 5);
+	await assertContinuousWires();
+	const myTestRoutes = await page.evaluate(() => {
+		const read = id => {
+			const path = document.querySelector(`path[data-circuit-edge="${id}"]`);
+			const numbers = path.getAttribute('d').match(/-?\d+(?:\.\d+)?/g).map(Number);
+			const origin = path.getPointAtLength(0);
+			const near = path.getPointAtLength(1);
+			return { points:Array.from({ length:numbers.length / 2 }, (_, index) => ({ x:numbers[index * 2], y:numbers[index * 2 + 1] })), tangent:{ x:near.x - origin.x, y:near.y - origin.y } };
+		};
+		return { incoming:read('mytest-a-junction'), nand:read('mytest-junction-nand'), xor:read('mytest-junction-xor') };
+	});
+	assert.deepEqual(myTestRoutes.incoming.points, [{ x:120, y:72 }, { x:268, y:72 }, { x:268, y:184 }], 'the input wire enters the vertical trunk directly at the junction x coordinate');
+	assert.ok(myTestRoutes.nand.tangent.y > .9 && Math.abs(myTestRoutes.nand.tangent.x) < .01, 'the lower NAND branch continues down the trunk');
+	assert.ok(myTestRoutes.xor.tangent.x > .9 && Math.abs(myTestRoutes.xor.tangent.y) < .01, 'the XOR branch leaves the right of the dot');
+	console.log('Passed: the reported NAND/XOR circuit retains its vertical junction trunk without a spurious left branch.');
+	await page.evaluate(() => window.circuitTest.showFeedbackFixture());
+	await page.getByRole('button', { name:'Edit', exact:true }).waitFor();
+	await block.hover();
+	await page.getByRole('button', { name:'Edit', exact:true }).click();
+	await page.getByRole('button', { name:'Done', exact:true }).waitFor();
+	await connectPins(pin('feedback-and', 'out'), pin('feedback-and', 'in-1'));
+	await page.waitForFunction(() => window.circuitTest.data().edges.length === 1);
+	assert.equal((await data()).edges[0].sourceNodeId, 'feedback-and');
+	assert.equal((await data()).edges[0].targetNodeId, 'feedback-and');
+	await assertContinuousWires();
+	await connectPins(pin('feedback-input', 'out'), pin('feedback-and', 'in-1'));
+	await page.getByRole('alert').filter({ hasText:'This input pin is already connected.' }).waitFor();
+	assert.equal((await data()).edges.length, 1, 'an occupied input rejects a second connection while preserving the feedback loop');
+	assert.equal(await page.getByRole('alert').innerText().then(text => /[0-9a-f]{8}-[0-9a-f]{4}-/.test(text)), false, 'connection errors use readable gate/pin names');
+	assert.equal(await page.getByRole('button', { name:'Reload from note', exact:true }).count(), 0, 'a rejected connection does not need unsaved-draft recovery');
+	await page.waitForTimeout(2500);
+	await connectPins(pin('feedback-input', 'out'), pin('feedback-and', 'in-1'));
+	await page.waitForTimeout(1900);
+	assert.equal(await page.getByRole('alert').filter({ hasText:'This input pin is already connected.' }).isVisible(), true, 'repeating the same rejected connection restarts its display interval');
+	await page.getByRole('alert').filter({ hasText:'This input pin is already connected.' }).waitFor({ state:'hidden', timeout:3500 });
+	await page.evaluate(() => window.circuitTest.rejectCommit());
+	await page.getByRole('alert').waitFor();
+	assert.equal(await page.getByRole('button', { name:'Reload from note', exact:true }).count(), 0, 'a rejected model action remains a transient alert');
+	await page.getByRole('alert').waitFor({ state:'hidden', timeout:5500 });
+	assert.equal(await page.getByRole('button', { name:'Undo circuit edit', exact:true }).isEnabled(), true, 'the editor becomes usable again after a rejected model action fades');
+	await page.getByRole('button', { name:'Undo circuit edit', exact:true }).click();
+	await page.waitForFunction(() => window.circuitTest.data().edges.length === 0);
+	await page.getByRole('button', { name:'Redo circuit edit', exact:true }).click();
+	await page.waitForFunction(() => window.circuitTest.data().edges.length === 1);
+	await assertContinuousWires();
+	assert.equal(await block.locator('[aria-label]').count(), 0, 'accessible controls, nodes, pins, and wires avoid Obsidian aria-label tooltip bubbles');
+	assert.equal(await page.getByRole('button', { name:'Decrease circuit scale', exact:true }).getAttribute('title'), 'Zoom out');
+	assert.equal(await page.getByRole('button', { name:'Increase circuit scale', exact:true }).getAttribute('title'), 'Zoom in');
+	await page.evaluate(() => window.circuitTest.holdWrites());
+	await page.getByRole('button', { name:'Increase circuit scale', exact:true }).click();
+	await page.waitForFunction(() => window.circuitTest.snapshot().saving);
+	await page.getByRole('textbox', { name:'Surrounding note text' }).click();
+	await page.waitForTimeout(100);
+	assert.equal(await page.evaluate(() => window.circuitTest.snapshot().editing), true, 'outside-click Done waits for an outstanding note save');
+	assert.equal(await page.evaluate(() => window.circuitTest.snapshot().saving), true);
+	await block.hover();
+	await page.getByRole('textbox', { name:'Circuit scale percentage', exact:true }).click();
+	await page.evaluate(() => window.circuitTest.releaseWrites());
+	await page.waitForFunction(() => !window.circuitTest.snapshot().saving);
+	await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+	assert.equal(await page.evaluate(() => window.circuitTest.snapshot().editing), true, 'deliberately returning inside the circuit cancels an older outside-click Done while its save is pending');
+	assert.equal(await page.getByRole('button', { name:'Done', exact:true }).isVisible(), true);
+	await page.evaluate(() => window.circuitTest.holdWrites());
+	await page.getByRole('button', { name:'Increase circuit scale', exact:true }).click();
+	await page.waitForFunction(() => window.circuitTest.snapshot().saving);
+	await page.getByRole('textbox', { name:'Surrounding note text' }).click();
+	await page.evaluate(() => window.circuitTest.releaseWrites());
+	await page.getByRole('button', { name:'Edit', exact:true }).waitFor();
+	assert.equal(await page.evaluate(() => window.circuitTest.snapshot().saving), false);
+	await block.hover();
+	await page.getByRole('button', { name:'Edit', exact:true }).click();
+	await page.getByRole('button', { name:'Done', exact:true }).waitFor();
+	await page.getByRole('button', { name:'Done', exact:true }).click();
+	const savedFeedback = await data();
+	await page.evaluate(() => window.circuitTest.remount());
+	assert.deepEqual(await data(), savedFeedback, 'a gate feedback loop survives saving and reopening');
+	await assertContinuousWires();
+	console.log('Passed: real same-gate feedback connections, readable occupied-input validation, undo/redo, and persisted reopening.');
+	await page.evaluate(() => window.circuitTest.showHeightFixture());
+	await page.getByRole('button', { name: 'Edit', exact: true }).waitFor();
+	const canvasBounds = () => page.locator('.logic-canvas').boundingBox();
+	const compact = await canvasBounds();
+	assert.ok(compact.height <= 112, `a one-row circuit has compact vertical padding (${compact.height}px)`);
+	await block.hover();
+	await page.getByRole('button', { name: 'Edit', exact: true }).click();
+	await page.getByRole('button', { name: 'Done', exact: true }).waitFor();
+	await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+	const startCanvas = await canvasBounds();
+	const anchor = page.locator('[data-id="height-anchor"] .logic-object');
+	const moving = page.locator('[data-id="height-moving"] .logic-object');
+	const beforeLegacySelection = await data();
+	const legacySelectionWrites = await page.evaluate(() => window.circuitTest.writes());
+	await anchor.click();
+	await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+	assert.equal(await deleteSelected.isEnabled(), true, 'selecting an existing off-grid node still enables deletion');
+	assert.deepEqual(await data(), beforeLegacySelection, 'selecting an existing off-grid node without movement must preserve its position');
+	assert.equal(await page.evaluate(() => window.circuitTest.writes()), legacySelectionWrites, 'selection alone must not save or snap an existing node');
+	const anchorStart = await center(anchor);
+	const movingStart = await center(moving);
+	const liveWrites = await page.evaluate(() => window.circuitTest.writes());
+	await page.mouse.move(movingStart.x, movingStart.y);
+	await page.mouse.down();
+	// A fast drag must respond to its first pointer movement, too.
+	await page.mouse.move(movingStart.x, movingStart.y + 192);
+	await page.waitForFunction(height => document.querySelector('.logic-canvas').getBoundingClientRect().height > height + 140, startCanvas.height);
+	const grownCanvas = await canvasBounds();
+	assert.equal(grownCanvas.y, startCanvas.y, 'dragging downward keeps the top boundary fixed');
+	assert.equal((await center(moving)).y - movingStart.y, 192, 'one fast pointer movement moves the node by the full distance');
+	assert.deepEqual(await center(anchor), anchorStart, 'growing the block does not translate other nodes');
+	assert.equal(await page.evaluate(() => window.circuitTest.writes()), liveWrites, 'live height expansion must not write during a drag');
+	assert.deepEqual((await data()).nodes.find(node => node.id === 'height-moving').position, { x: 384, y: 0 }, 'live drag positions stay out of the persisted model until release');
+	await page.mouse.move(movingStart.x, movingStart.y + 64, { steps: 12 });
+	await page.waitForFunction(height => document.querySelector('.logic-canvas').getBoundingClientRect().height < height - 100, grownCanvas.height);
+	assert.equal((await canvasBounds()).y, startCanvas.y, 'dragging upward keeps the top boundary fixed');
+	assert.equal(await page.evaluate(() => window.circuitTest.writes()), liveWrites, 'live height contraction must not write during a drag');
+	await page.mouse.up();
+	await page.waitForFunction(() => window.circuitTest.data().nodes.find(node => node.id === 'height-moving').position.y === 64);
+	await page.waitForFunction(writes => window.circuitTest.writes() === writes + 1, liveWrites);
+	await page.getByRole('button', { name: 'Undo circuit edit' }).click();
+	await page.waitForFunction(() => window.circuitTest.data().nodes.find(node => node.id === 'height-moving').position.y === 0);
+	const previewStart = await canvasBounds();
+	const previewWrites = await page.evaluate(() => window.circuitTest.writes());
+	await page.getByRole('button', { name: 'Place NAND', exact: true }).click();
+	await page.mouse.move(previewStart.x + 250, previewStart.y + previewStart.height - 2);
+	await page.mouse.move(previewStart.x + 250, previewStart.y + previewStart.height + 96, { steps: 12 });
+	await page.waitForFunction(height => document.querySelector('.logic-canvas').getBoundingClientRect().height > height + 90, previewStart.height);
+	const previewGrown = await canvasBounds();
+	assert.equal(previewGrown.y, previewStart.y, 'placement preview keeps the top boundary fixed');
+	assert.deepEqual(await center(anchor), anchorStart, 'placement expansion does not translate existing nodes');
+	assert.equal(await page.evaluate(() => window.circuitTest.writes()), previewWrites, 'placement previews do not save');
+	await page.mouse.move(previewStart.x + 250, previewStart.y + 48, { steps: 12 });
+	await page.waitForFunction(height => document.querySelector('.logic-canvas').getBoundingClientRect().height < height - 90, previewGrown.height);
+	assert.equal((await canvasBounds()).y, previewStart.y, 'placement contraction keeps the top boundary fixed');
+	await page.mouse.move(previewStart.x + 250, previewStart.y + previewStart.height + 96, { steps: 12 });
+	await page.mouse.click(previewStart.x + 250, previewStart.y + previewStart.height + 96);
+	await waitNodes(3);
+	assert.equal(await page.getByRole('button', { name: 'Place NAND', exact: true }).getAttribute('aria-pressed'), 'false', 'extended placement completes in one click');
+	await page.getByRole('button', { name: 'Undo circuit edit' }).click();
+	await waitNodes(2);
+	const dropStart = await canvasBounds();
+	const dropWrites = await page.evaluate(() => window.circuitTest.writes());
+	const transfer = await page.evaluateHandle(() => new DataTransfer());
+	const norTool = page.getByRole('button', { name: 'Place NOR', exact: true });
+	await norTool.dispatchEvent('dragstart', { dataTransfer: transfer });
+	await page.locator('.logic-canvas').dispatchEvent('dragover', { dataTransfer: transfer, clientX: dropStart.x + 250, clientY: dropStart.y + dropStart.height - 2 });
+	await page.locator('body').dispatchEvent('dragover', { dataTransfer: transfer, clientX: dropStart.x + 250, clientY: dropStart.y + dropStart.height + 96 });
+	await page.waitForFunction(height => document.querySelector('.logic-canvas').getBoundingClientRect().height > height + 90, dropStart.height);
+	const dropGrown = await canvasBounds();
+	assert.equal(dropGrown.y, dropStart.y, 'drag-and-drop preview keeps the top boundary fixed');
+	assert.equal(await page.evaluate(() => window.circuitTest.writes()), dropWrites, 'drag-and-drop previews do not save');
+	await page.locator('.logic-canvas').dispatchEvent('drop', { dataTransfer: transfer, clientX: dropStart.x + 250, clientY: dropStart.y + dropStart.height + 96 });
+	await norTool.dispatchEvent('dragend', { dataTransfer: transfer });
+	await transfer.dispose();
+	await waitNodes(3);
+	assert.ok((await data()).nodes.some(node => node.type === 'nor'), 'dropping in the extended area places the node');
+	console.log('Passed: ten-point zoom steps, compact blocks, and fixed-top live height growth/contraction during node movement and placement.');
+	assert.deepEqual(errors, []);
+	console.log(`Browser artifacts: ${directory}`);
+} catch (error) {
+	if (page) {
+		await page.screenshot({ path: join(directory, 'failure.png'), fullPage: false });
+		console.error(await page.locator('.logic-circuit').innerText());
+		console.error(JSON.stringify(await page.evaluate(() => window.circuitTest.data())));
+		console.error(await page.evaluate(() => ({ activeElement: document.activeElement ? { tag: document.activeElement.tagName, label: document.activeElement.getAttribute('aria-label'), className: document.activeElement.className } : null, controlVisibility: getComputedStyle(document.querySelector('.logic-block-controls')).visibility })));
+	}
+	console.error(`Failure artifacts: ${directory}`);
+	throw error;
+} finally {
+	await browser?.close();
+	await new Promise(resolve => server.close(resolve));
+}

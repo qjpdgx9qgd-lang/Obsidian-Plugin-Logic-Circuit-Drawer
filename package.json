@@ -1,0 +1,47 @@
+{
+	"name": "logic-circuits",
+	"version": "1.0.0",
+	"description": "Draw and edit digital logic circuits directly inside Markdown notes.",
+	"main": "main.js",
+	"type": "module",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"version": "node version-bump.mjs && git add manifest.json versions.json",
+		"lint": "eslint .",
+		"test": "node scripts/test.mjs",
+		"package": "npm run build && node scripts/package.mjs",
+		"test:ui": "node scripts/test-ui.mjs"
+	},
+	"keywords": [
+		"obsidian",
+		"logic-circuits",
+		"digital-logic",
+		"markdown"
+	],
+	"license": "MIT",
+	"devDependencies": {
+		"@codemirror/commands": "6.8.1",
+		"@eslint/js": "^9.39.4",
+		"@playwright/test": "^1.64.0",
+		"@types/node": "^22.15.17",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
+		"esbuild": "0.25.5",
+		"eslint": "^9.39.4",
+		"eslint-plugin-obsidianmd": "^0.4.0",
+		"globals": "^17.6.0",
+		"jiti": "^2.6.1",
+		"obsidian": "1.12.3",
+		"typescript": "^5.8.3",
+		"typescript-eslint": "^8.59.1"
+	},
+	"dependencies": {
+		"@codemirror/state": "^6.5.0",
+		"@codemirror/view": "^6.38.6",
+		"@xyflow/react": "^12.12.0",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0"
+	},
+	"author": "Yinlong Zhao"
+}
