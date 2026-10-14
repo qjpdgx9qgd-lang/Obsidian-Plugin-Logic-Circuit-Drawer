@@ -1,4 +1,5 @@
 import { build } from 'esbuild';
+import { noRuntimeScripts } from '../scripts/no-runtime-scripts.mjs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
@@ -7,7 +8,7 @@ import assert from 'node:assert/strict';
 import { chromium } from '@playwright/test';
 
 const directory = await mkdtemp(join(tmpdir(), 'logic-circuit-ui-'));
-await build({ entryPoints: ['tests/ui-harness.tsx'], bundle: true, platform: 'browser', outfile: join(directory, 'app.js'), define: { 'process.env.NODE_ENV': '"development"' }, logLevel: 'warning' });
+await build({ plugins: [noRuntimeScripts()], entryPoints: ['tests/ui-harness.tsx'], bundle: true, platform: 'browser', outfile: join(directory, 'app.js'), define: { 'process.env.NODE_ENV': '"development"' }, logLevel: 'warning' });
 const stylesheet = await readFile('styles.css', 'utf8');
 await writeFile(join(directory, 'styles.css'), stylesheet);
 await writeFile(join(directory, 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="styles.css"><style>

@@ -4,7 +4,7 @@ Earlier native checks were recorded on 13 October 2026 with Obsidian 1.14.4 on m
 
 ## Automated checks
 
-- `npm test`: 155 tests passed, covering circuit validation, junction operations, compound undo/redo, safe Markdown updates, insertion boundaries, copied-block races, save queues, conflict recovery, oversized/malformed data, aligned connector geometry, cardinal junction routing, whole-percentage scale steps, session ownership, and guarded block deletion/reordering. Regression cases include self-feedback through every gate, generic errors without object numbers or labels, exact line-slot spacing, repeated LF/CRLF moves without accumulating blank lines, ordinary selection lifecycle and isolation, note-only menu/command eligibility, delayed menu guards, the default insertion shortcut, insertion without trailing blank lines, deletion caret placement, guarded line insertion before/after a block, cancellation of stale circuit menus after switching to Reading view, and continuity ownership when an old retention releases the same or a different editor view.
+- `npm test`: 158 tests passed, covering circuit validation, junction operations, compound undo/redo, safe Markdown updates, insertion boundaries, copied-block races, save queues, conflict recovery, oversized/malformed data, aligned connector geometry, cardinal junction routing, whole-percentage scale steps, session ownership, and guarded block deletion/reordering. Regression cases include self-feedback through every gate, generic errors without object numbers or labels, exact line-slot spacing, repeated LF/CRLF moves without accumulating blank lines, ordinary selection lifecycle and isolation, note-only menu/command eligibility, delayed menu guards, the default insertion shortcut, insertion without trailing blank lines, deletion caret placement, guarded line insertion before/after a block, cancellation of stale circuit menus after switching to Reading view, and continuity ownership when an old retention releases the same or a different editor view. Build regressions reject unaudited React DOM changes and script factories, script parsing, or generated executable code in emitted JavaScript.
 - `npm run package`: TypeScript compilation and production esbuild bundle passed; installable files were copied to `dist/logic-circuits/`.
 - `npx tsc --project tests/tsconfig.json --noEmit`: test and harness types passed.
 - `npm run lint`: no errors. Two advisories remain: Obsidian discourages default shortcuts, but the requested insertion shortcut is an explicit product requirement; the settings search API is newer than the supported minimum version. The default scale remains available in the plugin's settings tab.
@@ -14,7 +14,7 @@ Earlier native checks were recorded on 13 October 2026 with Obsidian 1.14.4 on m
 
 ## Browser interaction checks
 
-`npm run test:ui` runs seven isolated Chromium suites: diagram UI, CodeMirror integration, node-drag scrolling, closing scroll, native-renderer replacement, undo/focus, and Markdown line deletion. The diagram harness uses the real editor, model, and editing session with an in-memory note store. It verifies:
+`npm run test:ui` runs eight isolated Chromium suites: diagram UI, CodeMirror integration, node-drag scrolling, closing scroll, native-renderer replacement, undo/focus, Markdown line deletion, and runtime script restrictions. All browser bundles use the same React DOM build restriction as the plugin. The diagram harness uses the real editor, model, and editing session with an in-memory note store. It verifies:
 
 - One-shot placement and toolbar drag-and-drop.
 - Terminal label editing, normal and reversed connection gestures, snapped movement, and no saves during pointer movement.
@@ -71,6 +71,10 @@ The closing suite covers 48 combinations of custom/native fallback rendering, in
 The harness captures screenshots and reports their temporary-directory location. It checks for unhandled browser errors. Screenshot checks supplement the automated interaction assertions; they are not pixel-comparison tests.
 
 ## Native Obsidian checks
+
+The runtime-script fix was checked on 2026-10-14. The original React DOM bundle fails the new browser regression by attempting `Document.createElement('script')` through `preinit`. The restricted development and production renderers reject `preinit`, `preinitModule`, inline/async/uppercase/SVG/namespaced script elements, and raw HTML before any script construction, insertion, execution, or script request. Ordinary buttons, styles, and SVG remain functional. All eight browser suites and 158 unit tests pass; these script-path checks run in Chromium, separately from Obsidian.
+
+The production build was packaged and reloaded through Obsidian's Community plugins controls; the installed manifest refreshed to v1.0.1. Both diagrams in **Logic circuits** rendered, Edit/Done worked, and Reading view rendered without editing controls. The note was restored to Live Preview and remained byte-for-byte unchanged (SHA-256 `be45181cfcee1fe1aec96102f5073fccf04034659181e3491534769a9a539e8a`). Root and packaged bundles matched SHA-256 `1a39183f222bc7df44112411ddd7b9a4dee0e008304fb9b61392aed68886e9b2`. This native check covers plugin loading and normal rendering; deliberate script rejection is covered by the browser regression.
 
 A dedicated **Logic circuit verification** note was created in the test vault. Native checks confirmed:
 

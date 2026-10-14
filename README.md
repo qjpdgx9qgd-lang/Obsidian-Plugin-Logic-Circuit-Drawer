@@ -73,6 +73,8 @@ npm run package
 
 Sources are separated into `src/model/`, `src/storage/`, `src/ui/`, and `src/integration/`. React and React Flow are bundled into `main.js`; Obsidian supplies the external CodeMirror runtime. The build combines React Flow's base stylesheet and `src/ui/styles.css` into shipped `styles.css`.
 
+The build removes React DOM's unused script loaders and script-rendering paths, rejects dynamic script tags and raw HTML, and checks the emitted bundle for script creation. [scripts/no-runtime-scripts.mjs](scripts/no-runtime-scripts.mjs) verifies the audited React DOM source before transforming it; dependency upgrades require reviewing these paths and updating the audited hashes. Development and production builds use the same restrictions, covered by `npm run test:ui -- runtime-scripts`.
+
 ## Initial limitations
 
 - No simulation, truth tables, analog components, chips, or nested circuits.

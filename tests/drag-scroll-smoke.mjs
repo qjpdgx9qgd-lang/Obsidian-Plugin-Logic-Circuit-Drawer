@@ -1,4 +1,5 @@
 import { build } from 'esbuild';
+import { noRuntimeScripts } from '../scripts/no-runtime-scripts.mjs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -7,7 +8,7 @@ import assert from 'node:assert/strict';
 import { chromium } from '@playwright/test';
 
 const directory = await mkdtemp(join(tmpdir(), 'logic-circuit-drag-scroll-'));
-await build({ entryPoints: ['tests/cm-harness.tsx'], bundle: true, platform: 'browser', outfile: join(directory, 'app.js'),
+await build({ plugins: [noRuntimeScripts()], entryPoints: ['tests/cm-harness.tsx'], bundle: true, platform: 'browser', outfile: join(directory, 'app.js'),
 	alias: { obsidian: resolve('tests/browser-obsidian.ts') }, define: { 'process.env.NODE_ENV': '"development"' }, logLevel: 'warning' });
 await writeFile(join(directory, 'styles.css'), await readFile('styles.css', 'utf8'));
 await writeFile(join(directory, 'index.html'), `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="styles.css"><style>

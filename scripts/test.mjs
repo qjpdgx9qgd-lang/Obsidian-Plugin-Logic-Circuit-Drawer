@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const tests = (await readdir('tests')).filter(name => name.endsWith('.test.ts'));
+const tests = (await readdir('tests')).filter(name => /\.test\.(ts|mjs)$/.test(name));
 const directory = await mkdtemp(join(tmpdir(), 'logic-circuit-tests-'));
 const outputs = [];
 for (const test of tests) {
+	if (test.endsWith('.mjs')) { outputs.push(join('tests', test)); continue; }
 	const output = join(directory, test.replace(/\.ts$/, '.cjs'));
 	await build({ entryPoints: [join('tests', test)], bundle: true, platform: 'node', format: 'cjs', outfile: output, alias: { obsidian: './tests/obsidian-stub.ts' }, logLevel: 'warning' });
 	outputs.push(output);

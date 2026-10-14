@@ -1,6 +1,6 @@
 {
 	"name": "logic-circuits",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "Draw and edit digital logic circuits directly inside Markdown notes.",
 	"main": "main.js",
 	"type": "module",
@@ -40,8 +40,8 @@
 		"@codemirror/state": "^6.5.0",
 		"@codemirror/view": "^6.38.6",
 		"@xyflow/react": "^12.12.0",
-		"react": "^19.3.0",
-		"react-dom": "^19.3.0"
+		"react": "19.3.0",
+		"react-dom": "19.3.0"
 	},
 	"author": "Yinlong Zhao"
 }

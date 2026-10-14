@@ -33,7 +33,7 @@ export default defineConfig(
 	...obsidianmd.configs.recommended,
 	{
 		// These harnesses run in Chromium with browser DOM APIs and minimal host doubles.
-		files: ['tests/browser-obsidian.ts', 'tests/cm-harness.tsx', 'tests/reading-lifecycle-fixtures.ts'],
+		files: ['tests/browser-obsidian.ts', 'tests/cm-harness.tsx', 'tests/reading-lifecycle-fixtures.ts', 'tests/runtime-scripts-harness.tsx'],
 		rules: {
 			'obsidianmd/prefer-create-el': 'off',
 			'obsidianmd/no-tfile-tfolder-cast': 'off',
