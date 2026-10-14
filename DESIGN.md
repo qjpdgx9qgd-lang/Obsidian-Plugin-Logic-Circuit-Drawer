@@ -30,7 +30,7 @@ In this document, a **node** means any placed gate, terminal, or junction. Gates
 - The complete circuit is visible, including symbols, labels, junctions, and routed wires.
 - There is no internal scrolling, panning, or freely navigable infinite canvas.
 - Keep the finished block close to its content height, with 16 model-independent pixels of padding above and below. Empty editing canvases start at 128 pixels high.
-- Update the lower boundary continuously during movement and placement previews, including when the pointer moves below the previous boundary. Grow when objects move down and shrink when they move up. Keep the top origin fixed throughout an editing session; save only completed actions.
+- Update the lower boundary continuously during movement and placement previews, including when the pointer moves below the previous boundary. Grow when objects move down and shrink when they move up. Keep the top origin fixed throughout an editing session, including saves and widget replacement. Retain empty space above moved nodes until editing ends, then compact the finished layout; save only completed actions.
 - Keep padding around the diagram so strokes, labels, and hit targets are not clipped.
 - Prefer horizontal layouts: signals generally flow from inputs on the left to outputs on the right. Terminals remain freely placeable and are not locked to the block edges.
 
@@ -71,7 +71,9 @@ The setting initializes newly inserted circuits only. Existing circuits keep the
 
 ### Finished diagram
 
-Show the circuit with block controls revealed on hover or keyboard focus. Hide the gate toolbar, grid, pin interaction indicators, and selection decoration. Wires, labels, and junction dots remain visible. Suppress Obsidian's additional native code-block hover controls for circuit blocks only.
+In Live Preview, show the circuit with block controls revealed on hover or keyboard focus. Hide the gate toolbar, grid, pin interaction indicators, and selection decoration. Wires, labels, and junction dots remain visible. Suppress Obsidian's additional native code-block hover controls for circuit blocks only.
+
+Reading view is display-only. Do not reveal circuit controls on hover or focus, open the editor on double-click, select circuit elements or the whole block, or offer circuit mutation actions in its context menu. Keep ordinary note scrolling and the note's native context menu available. Editing, block movement, and block deletion belong to Live Preview; Source mode retains normal Markdown editing.
 
 Use short native delayed tooltips where useful. Avoid Obsidian's immediate black tooltip bubbles; provide accessible names through referenced hidden labels rather than tooltip-triggering attributes.
 
@@ -210,7 +212,7 @@ Advanced obstacle avoidance is excluded. Wires may cross other wires or pass thr
 
 - **Esc** cancels placement or a pending connection. In a label field it cancels the label edit.
 - **Delete** or **Backspace** removes selected diagram elements only when diagram controls have focus, outside text entry.
-- **Ctrl/Cmd + Z** and redo shortcuts operate on circuit history when the diagram editor has focus, outside label text entry.
+- **Ctrl/Cmd + Z** and redo shortcuts operate on circuit history when the circuit has focus, including after **Done**, outside text entry. Confirming or cancelling a label or percentage returns focus to the circuit without scrolling.
 - Text fields retain normal text selection, deletion, and undo behavior.
 - Outside the diagram editor, note editing shortcuts retain their normal behavior.
 - Ordinary wheel and trackpad scrolling moves through the note, not through or around the circuit.
@@ -237,7 +239,7 @@ The public menu API can assign the note context-menu action to an insertion sect
 
 | Mode | Behavior |
 | --- | --- |
-| Reading view | Render the circuit inline with controls and support in-place editing |
+| Reading view | Display the saved circuit without circuit editing controls or mutation actions |
 | Live Preview | Render an inline widget; interactions must not unexpectedly reveal JSON or move the Markdown cursor into the block |
 | Source mode | Show the original fenced code and allow normal Markdown editing |
 

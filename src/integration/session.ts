@@ -39,6 +39,7 @@ export class CircuitSession {
 	private opening: Promise<void> | null = null;
 	private pendingIdentity: string | null = null;
 	private transientError = false;
+	private editingOriginY: number | undefined;
 	private disposed = false;
 	readonly host: SessionHost;
 	constructor(host: SessionHost, block: LogicBlock) {
@@ -51,6 +52,11 @@ export class CircuitSession {
 			blockSelected: false, actionErrorId: 0 };
 	}
 	getSnapshot = (): CircuitSnapshot => this.snapshot;
+	/** Editing whitespace belongs to the session, not a replaceable widget. */
+	getEditingOrigin(minimumY: number): number {
+		if (!this.snapshot.editing) return minimumY;
+		return this.editingOriginY ??= minimumY;
+	}
 	subscribe = (listener: () => void): (() => void) => {
 		this.listeners.add(listener);
 		return () => { this.listeners.delete(listener); };
@@ -76,6 +82,7 @@ export class CircuitSession {
 	}
 	private update(patch: Partial<CircuitSnapshot>, transientError = false): void {
 		if (this.disposed) return;
+		if (patch.editing !== undefined && patch.editing !== this.snapshot.editing) this.editingOriginY = undefined;
 		if ('error' in patch) this.transientError = transientError && !!patch.error;
 		this.snapshot = { ...this.snapshot, ...patch, canUndo: this.past.length > 0, canRedo: this.future.length > 0 };
 		for (const listener of this.listeners) listener();

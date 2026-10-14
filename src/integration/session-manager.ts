@@ -1,4 +1,5 @@
 import { App, Editor, MarkdownView, Modal, Notice, TFile } from 'obsidian';
+import type { EditorView } from '@codemirror/view';
 import type { LogicBlock } from '../storage/blocks';
 import { CircuitSession } from './session';
 import { NoteStore } from './note-store';
@@ -115,10 +116,12 @@ export class SessionManager {
 	}
 
 	/** A replaced CodeMirror view must not close the successor using this editor. */
-	retainEditor(editor: Editor): () => void {
+	retainEditor(editor: Editor, view?: EditorView): () => void {
 		const owner = {};
+		const releaseView = view ? this.store.retainEditorView(editor, view) : undefined;
 		this.editorOwners.set(editor, owner);
 		return () => {
+			releaseView?.();
 			if (this.editorOwners.get(editor) !== owner) return;
 			this.editorOwners.delete(editor);
 			this.closeEditor(editor);

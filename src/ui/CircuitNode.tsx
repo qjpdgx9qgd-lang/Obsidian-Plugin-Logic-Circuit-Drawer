@@ -1,5 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import { useId, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import { pinsFor } from '../model/circuit';
 import type { CircuitNode } from '../model/types';
 import { GateSymbol } from './GateSymbol';
@@ -18,13 +18,14 @@ export function CircuitObject({ data, selected }: NodeProps<FlowNode>) {
 	const [labelEditing, setLabelEditing] = useState(false);
 	const [draft, setDraft] = useState(node.label ?? '');
 	const cancelled = useRef(false);
+	useEffect(() => { if (!editing) { cancelled.current = true; setLabelEditing(false); } }, [editing]);
 	const terminal = node.type === 'input' || node.type === 'output';
 	const name = useAccessibleLabel(terminal ? `${node.type}: ${node.label ?? ''}` : node.type.toUpperCase());
 	const labelName = useAccessibleLabel(`Edit ${node.type} label`);
 	const pinLabels = useId();
 	const terminalSize = terminalGeometry(node.label);
 	const confirmLabel = () => {
-		if (!cancelled.current && draft !== node.label) label(node, draft);
+		if (editing && !cancelled.current && draft !== node.label) label(node, draft);
 		cancelled.current = true;
 		setLabelEditing(false);
 	};
@@ -32,14 +33,17 @@ export function CircuitObject({ data, selected }: NodeProps<FlowNode>) {
 		{name.label}
 		{terminal && labelEditing && labelName.label}
 		{node.type === 'junction' ? <span className="logic-junction-dot" />
-			: terminal ? <><div className="logic-terminal-body" style={{ height: terminalSize.labelHeight }} onDoubleClick={event => {
+			: terminal ? <><div className="logic-terminal-body" style={{ top: terminalSize.labelTop, height: terminalSize.labelHeight }} onDoubleClick={event => {
 				if (!editing) return;
 				event.stopPropagation(); cancelled.current = false; setDraft(node.label ?? ''); setLabelEditing(true);
 			}}>
-				{labelEditing ? <textarea autoFocus className="logic-label-input nodrag nopan nowheel" value={draft} maxLength={200} rows={1} aria-labelledby={labelName.id} onChange={event => setDraft(event.target.value)} onBlur={confirmLabel} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
+				{editing && labelEditing ? <textarea autoFocus className="logic-label-input nodrag nopan nowheel" value={draft} maxLength={200} rows={1} aria-labelledby={labelName.id} onChange={event => setDraft(event.target.value)} onBlur={confirmLabel} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
 					event.stopPropagation();
-					if (event.key === 'Enter') { event.preventDefault(); confirmLabel(); }
-					if (event.key === 'Escape') { event.preventDefault(); cancelled.current = true; setLabelEditing(false); }
+					// The textarea disappears on completion; retain keyboard routing
+					// on the persistent circuit instead of falling back to the body.
+					const focusCircuit = () => event.currentTarget.closest<HTMLElement>('.logic-circuit')?.focus({ preventScroll: true });
+					if (event.key === 'Enter') { event.preventDefault(); confirmLabel(); focusCircuit(); }
+					if (event.key === 'Escape') { event.preventDefault(); cancelled.current = true; setLabelEditing(false); focusCircuit(); }
 				}} /> : <span className="logic-terminal-label">{node.label || '\u00a0'}</span>}
 			</div><svg className="logic-terminal-marker" viewBox={`0 0 ${size.width} 16`} style={{ position: 'absolute', top: terminalSize.markerTop, left: 0, width: size.width, height: 16 }} aria-hidden="true">
 				<g fill="none" stroke="currentColor" strokeWidth="1.6">

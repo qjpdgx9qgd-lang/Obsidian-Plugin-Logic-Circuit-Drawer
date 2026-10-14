@@ -4,8 +4,9 @@ import { scanCircuitBlocks } from '../storage/blocks';
 import { mountCircuit } from '../ui/mount';
 import type { SessionManager } from './session-manager';
 import { circuitBlockActions } from './block-actions';
-import { ReadingBlockDrag } from './reading-block-drag';
 import { cancelBlockDrag, startBlockDrag } from './block-drag';
+import { preserveResizeScroll } from './resize-scroll';
+import { cancelCircuitFocusSession, preserveCircuitFocus } from './focus-continuity';
 
 class CircuitRenderChild extends MarkdownRenderChild {
 	private unmount: (() => void) | undefined;
@@ -84,12 +85,31 @@ export function renderReadingCircuit(app: App, manager: SessionManager, source: 
 		const unique = Boolean(block.circuitId && blocks.filter(item => item.circuitId === block.circuitId).length === 1);
 		// Native code-block rendering can precede the Live Preview decoration.
 		// Bind to its public editor host immediately so saves cannot close it.
-		const editor = pane instanceof MarkdownView && pane.file === file && pane.getMode() === 'source' ? pane.editor : undefined;
+		const editor = !element.closest('.markdown-preview-view') && pane instanceof MarkdownView
+			&& pane.file === file && pane.getMode() === 'source' ? pane.editor : undefined;
 		const session = manager.open(file, pane, block, editor, editor ? undefined : locate, unique);
-		const preview = element.closest<HTMLElement>('.markdown-preview-view');
-		const drag = preview && !session.host.editor ? new ReadingBlockDrag(session, preview, context) : undefined;
-		const move = editor ? (event: DragEvent) => startBlockDrag(session, element.ownerDocument, event) : drag?.start;
-		const cancel = editor ? () => cancelBlockDrag(element.ownerDocument) : drag?.clear;
-		return mountCircuit(element, session, manager, circuitBlockActions(session, move, cancel), () => drag?.dispose());
+		if (!editor) cancelCircuitFocusSession(session);
+		// The same postprocessor supplies temporary native Live Preview output.
+		// Only that source-mode host may edit; Reading view stays read-only even
+		// when its session still carries editing state from the previous mode.
+		const isEditable = () => Boolean(editor) && !element.closest('.markdown-preview-view')
+			&& pane instanceof MarkdownView && pane.file === file
+			&& pane.editor === editor && pane.getMode() === 'source';
+		const subscribe = (listener: () => void) => {
+			const refs = [app.workspace.on('layout-change', listener), app.workspace.on('file-open', listener)];
+			return () => { for (const ref of refs) app.workspace.offref(ref); };
+		};
+		const move = (event: DragEvent) => { if (isEditable()) startBlockDrag(session, element.ownerDocument, event); };
+		const cancel = () => cancelBlockDrag(element.ownerDocument);
+		const actions = editor ? circuitBlockActions(session, move, cancel, isEditable) : undefined;
+		const currentView = () => editor && isEditable() ? manager.store.editorView(editor) : undefined;
+		const cleanup = (callback: () => void) => manager.trackCleanup(callback);
+		const resizeScroll = editor ? preserveResizeScroll(currentView, element, session, cleanup) : undefined;
+		const focus = editor ? preserveCircuitFocus(currentView, element, session, isEditable, cleanup) : undefined;
+		if (actions && resizeScroll) {
+			actions.beforeResize = resizeScroll.beforeResize;
+			actions.afterResize = () => { focus?.afterRender(); resizeScroll.afterResize(); };
+		}
+		return mountCircuit(element, session, manager, actions, () => { focus?.dispose(); resizeScroll?.dispose(); }, { isEditable, subscribe });
 	}));
 }

@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EditorState, StateEffect, Transaction } from '@codemirror/state';
+import type { Extension, TransactionSpec } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
+import { history, undoDepth } from '@codemirror/commands';
 import type { App, Editor } from 'obsidian';
 import { MarkdownView, TFile } from './obsidian-stub';
 import { NoteStore } from '../src/integration/note-store';
@@ -36,6 +40,21 @@ class MemoryEditor {
 		if (transaction.selection) this.selection = transaction.selection.from;
 		this.transactions++;
 	}
+}
+
+/** Exercise CodeMirror transactions without requiring browser layout. */
+function stateView(editor: MemoryEditor, extensions: Extension[] = []) {
+	const transactions: Transaction[] = [];
+	const view = {
+		state: EditorState.create({ doc: editor.value, selection: { anchor: 0 }, extensions }),
+		dispatch(spec: TransactionSpec): void {
+			const transaction = view.state.update(spec);
+			transactions.push(transaction);
+			view.state = transaction.state;
+			editor.value = view.state.doc.toString();
+		},
+	};
+	return { view: view as unknown as EditorView, transactions };
 }
 
 const blockFor = (circuit: CircuitData): string => `\`\`\`logic-circuit\n${serializeCircuit(circuit)}\n\`\`\``;
@@ -80,6 +99,86 @@ void test('active editor contents are authoritative and only the circuit payload
 	assert.equal(scanCircuitBlocks(editor.value)[1]!.content, scanCircuitBlocks(text)[1]!.content);
 	assert.equal(parseCircuit(saved.content).view.preferredScale, 1.5);
 	assert.equal(await store.read(file), editor.value);
+});
+
+void test('retained-view circuit saves preserve the Markdown caret and normal editor integrations without requesting scroll', async () => {
+	const { circuit, text, file, views, baseline, store } = setup();
+	const editor = new MemoryEditor(text);
+	views.push(new MarkdownView(file, editor));
+	const audit = StateEffect.define<number>();
+	const filteredOrigins: (string | undefined)[] = [];
+	const cm = stateView(editor, [history(),
+		EditorState.transactionFilter.of(transaction => {
+			filteredOrigins.push(transaction.annotation(Transaction.userEvent));
+			return transaction;
+		}),
+		EditorState.transactionExtender.of(transaction => transaction.docChanged ? { effects: audit.of(17) } : null),
+	]);
+	store.retainEditorView(editor as unknown as Editor, cm.view);
+	const saved = await store.write(file, editor as unknown as Editor, baseline, withScale(circuit, 1.5));
+	assert.equal(editor.transactions, 0, 'the Obsidian wrapper must not request caret scrolling for a payload save');
+	assert.equal(cm.transactions.length, 1);
+	const transaction = cm.transactions[0]!;
+	assert.equal(transaction.scrollIntoView, false);
+	assert.equal(transaction.selection, undefined);
+	assert.equal(cm.view.state.selection.main.anchor, 0);
+	assert.equal(editor.focusCount, 0);
+	assert.equal(transaction.annotation(Transaction.userEvent), 'logic-circuit');
+	assert.deepEqual(filteredOrigins, ['logic-circuit']);
+	assert.ok(transaction.effects.some(effect => effect.is(audit) && effect.value === 17));
+	assert.equal(undoDepth(cm.view.state), 1, 'the circuit save remains part of normal note history');
+	assert.equal(editor.value, updateCircuitBlock(text, baseline, withScale(circuit, 1.5)).text);
+	assert.equal(parseCircuit(saved.content).view.preferredScale, 1.5);
+});
+
+void test('releasing a replaced view retains its successor and releasing the current view restores the editor fallback', async () => {
+	const { circuit, text, file, views, baseline, store } = setup();
+	const editor = new MemoryEditor(text);
+	views.push(new MarkdownView(file, editor));
+	const previous = stateView(editor);
+	const current = stateView(editor);
+	const releasePrevious = store.retainEditorView(editor as unknown as Editor, previous.view);
+	const releaseCurrent = store.retainEditorView(editor as unknown as Editor, current.view);
+	releasePrevious();
+	const saved = await store.write(file, editor as unknown as Editor, baseline, withScale(circuit, 1.5));
+	assert.equal(previous.transactions.length, 0);
+	assert.equal(current.transactions.length, 1);
+	assert.equal(editor.transactions, 0);
+	releasePrevious();
+	releaseCurrent();
+	releaseCurrent();
+	await store.write(file, editor as unknown as Editor, { ...baseline, content: saved.content, from: saved.from }, withScale(circuit, 2));
+	assert.equal(current.transactions.length, 1);
+	assert.equal(editor.transactions, 1);
+	assert.equal(parseCircuit(scanCircuitBlocks(editor.value)[0]!.content).view.preferredScale, 2);
+});
+
+void test('a retained view with different document contents rejects the save before either editor is changed', async () => {
+	const { circuit, text, file, views, baseline, store } = setup();
+	const editor = new MemoryEditor(text);
+	views.push(new MarkdownView(file, editor));
+	const staleEditor = new MemoryEditor(`Stale pane\n${text}`);
+	const stale = stateView(staleEditor);
+	store.retainEditorView(editor as unknown as Editor, stale.view);
+	await assert.rejects(store.write(file, editor as unknown as Editor, baseline, withScale(circuit, 1.5)), /note editor changed/);
+	assert.equal(stale.transactions.length, 0);
+	assert.equal(editor.transactions, 0);
+	assert.equal(editor.value, text);
+	assert.equal(staleEditor.value, `Stale pane\n${text}`);
+});
+
+void test('structural edits retain the wrapper transaction and intentional caret placement even with a retained view', async () => {
+	const { text, file, views, store } = setup();
+	const editor = new MemoryEditor(text);
+	views.push(new MarkdownView(file, editor));
+	const cm = stateView(editor);
+	store.retainEditorView(editor as unknown as Editor, cm.view);
+	const block = scanCircuitBlocks(text)[0]!;
+	await store.insertBlockLine(file, editor as unknown as Editor, structuralBaseline(text, block), 'after');
+	assert.equal(cm.transactions.length, 0);
+	assert.equal(editor.transactions, 1);
+	assert.equal(editor.focusCount, 1);
+	assert.deepEqual(editor.selection, { line: block.endLine + 1, ch: 0 });
 });
 
 void test('target edits in an active editor are rejected before transaction', async () => {

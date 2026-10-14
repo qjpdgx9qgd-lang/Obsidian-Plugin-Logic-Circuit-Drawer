@@ -1,4 +1,6 @@
 /* The build prepends React Flow's local stylesheet. All theme rules stay inside the block. */
+/* Include the circuit's vertical margins in the widget height measured by CodeMirror. */
+.logic-circuit-widget { display: flow-root; }
 .logic-circuit {
 	--logic-ink: var(--text-normal, #263244);
 	--logic-muted: var(--text-muted, #697386);
@@ -21,7 +23,7 @@
 	text-align: left;
 	outline: none;
 }
-.logic-circuit:focus-visible { box-shadow: 0 0 0 2px var(--logic-accent); }
+.logic-circuit:not(.is-read-only):focus-visible { box-shadow: 0 0 0 2px var(--logic-accent); }
 .logic-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; pointer-events: none; }
 .logic-circuit.is-editing { border-color: var(--logic-accent); }
 .logic-circuit.is-block-selected { outline: 2px solid var(--logic-accent); outline-offset: 2px; }
@@ -94,7 +96,7 @@
 .logic-object.is-selected::before { border-color: var(--logic-accent); background: color-mix(in srgb, var(--logic-accent) 7%, transparent); }
 .logic-gate-symbol { display: block; width: 100%; height: 100%; overflow: visible; }
 .logic-symbol-body { fill: var(--logic-paper); }
-.logic-terminal-body { position: absolute; top: 0; left: 0; width: 100%; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; }
+.logic-terminal-body { position: absolute; z-index: 6; top: 0; left: 0; width: 100%; display: flex; align-items: flex-end; justify-content: center; padding: 0; border: 0; background: transparent; }
 .logic-terminal-marker { position: absolute; left: 0; overflow: visible; pointer-events: none; }
 .logic-terminal-marker path, .logic-terminal-marker circle { stroke: var(--logic-ink); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
 .logic-terminal-marker path { fill: none; }
@@ -116,6 +118,8 @@
 .logic-wire .react-flow__edge-path { fill: none; stroke: var(--logic-ink); stroke-width: 1.5px; }
 .logic-wire.is-selected .react-flow__edge-path, .logic-wire.is-branch-target .react-flow__edge-path { stroke: var(--logic-accent); stroke-width: 2px; }
 .logic-wire .react-flow__edge-interaction { cursor: pointer; }
+.logic-circuit.is-read-only .react-flow__edge-interaction { cursor: default; pointer-events: none; }
+.logic-circuit.is-read-only .react-flow__edge-path { stroke: var(--logic-ink); }
 .logic-branch-handle { fill: var(--logic-paper); stroke: var(--logic-accent); stroke-width: 1.5px; vector-effect: non-scaling-stroke; cursor: crosshair; pointer-events: all; }
 .logic-branch-handle.is-target { fill: var(--logic-accent); pointer-events: none; }
 .logic-circuit .react-flow__connection-path { stroke: var(--logic-accent); stroke-width: 1.5px; }

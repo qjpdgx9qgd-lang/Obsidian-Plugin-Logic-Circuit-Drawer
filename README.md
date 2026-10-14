@@ -18,7 +18,7 @@ The permanent plugin ID is `logic-circuits`; the installed folder must use that 
 
 - In an editable Markdown note, use **Cmd + Shift + L** on macOS or **Ctrl + Shift + L** on Windows/Linux, run **Logic circuits: Insert logic circuit** from the command palette, or select **Insert logic circuit** from the note's right-click menu. Change the default shortcut through **Settings → Hotkeys** if desired.
 - In Live Preview, the new block opens for editing without adding an extra blank line after it. Source mode shows the JSON instead of changing your note mode.
-- Double-click a finished circuit block, or select **Edit**, to open its inline editor.
+- In Live Preview, double-click a finished circuit block, or select **Edit**, to open its inline editor.
 - Select a gate, **Input**, or **Output** in the toolbar, then click in the block. You can also drag the toolbar item into the diagram. Each action places one object.
 - Drag objects to move them on the 8-pixel grid. Gate centers, pins, and terminal markers can align exactly. The lower boundary grows and shrinks during movement or placement previews; the top stays fixed during editing. Drag between pins to connect them; the gesture works in either direction. Inputs accept one connection, while outputs can feed multiple targets.
 - A gate's output can connect back to its own incoming pin to draw feedback loops. The diagram still enforces one connection per incoming pin.
@@ -33,7 +33,7 @@ The permanent plugin ID is `logic-circuits`; the installed folder must use that 
 - The rubbish bin button removes selected diagram elements and is disabled when nothing is selected.
 - Select **Done**, or click elsewhere, to return to the uncluttered inline diagram. Completed actions save automatically, including undo and redo; finishing waits for pending saves and confirms an active label or scale field.
 
-Each block fills the note's content width and displays its entire circuit. Hover over the block to reveal **−**, **+**, **Fit**, and **Edit**; keyboard focus also makes these controls available. Type a zoom percentage between **−** and **+**, then press **Enter** or leave the field to apply it. **Esc** cancels. Values from 25% to 300% are accepted, with enlargement capped to the available width. Scale changes do not rewrite object positions. Narrower panes temporarily reduce the displayed scale; each circuit keeps its saved preference.
+Each block fills the note's content width and displays its entire circuit. In Live Preview, hover over the block to reveal **−**, **+**, **Fit**, and **Edit**; keyboard focus also makes these controls available. Type a zoom percentage between **−** and **+**, then press **Enter** or leave the field to apply it. **Esc** cancels. Values from 25% to 300% are accepted, with enlargement capped to the available width. Scale changes do not rewrite object positions. Narrower panes temporarily reduce the displayed scale; each circuit keeps its saved preference.
 
 Controls use short, delayed native tooltips. The immediate black tooltip bubbles are removed while accessible control names remain available to assistive technology.
 
@@ -41,7 +41,7 @@ Controls use short, delayed native tooltips. The immediate black tooltip bubbles
 
 Set the initial scale for new blocks in **Settings → Logic circuits → Default circuit scale**. Existing circuits retain their own scales.
 
-Reading view also supports inline editing. In Source mode, edit the fenced JSON as normal Markdown. Ordinary scrolling moves through the note, and note keyboard shortcuts remain available outside the diagram.
+Reading view displays the saved circuit without editing controls, circuit menus, or selection effects. Switch to Live Preview to edit a diagram or move/delete its block. In Source mode, edit the fenced JSON as normal Markdown. Ordinary scrolling moves through the note, and note keyboard shortcuts remain available outside the diagram.
 
 ## Saving and recovery
 

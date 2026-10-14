@@ -6,6 +6,8 @@ export interface CircuitBlockActions {
 	menu: (event: MouseEvent, remove: () => void, onClose?: () => void) => void;
 	move?: (event: DragEvent) => void;
 	cancelMove?: () => void;
+	beforeResize?: (dragging: boolean) => void;
+	afterResize?: () => void;
 }
 
 export function BlockTools({ actions, selected, select, disabled }: {

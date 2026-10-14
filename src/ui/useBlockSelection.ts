@@ -26,17 +26,17 @@ export function useTransientMessage(container: RefObject<HTMLElement | null>) {
 	return [notice.text, setMessage] as const;
 }
 
-export function useBlockSelection(session: CircuitSession, actions?: CircuitBlockActions) {
+export function useBlockSelection(session: CircuitSession, actions?: CircuitBlockActions, enabled = true, canEdit?: () => boolean) {
 	const container = useRef<HTMLDivElement>(null);
-	const selection = useCallback(() => session.getSnapshot().blockSelected, [session]);
+	const selection = useCallback(() => enabled && session.getSnapshot().blockSelected, [session, enabled]);
 	const selected = useSyncExternalStore(session.subscribe, selection);
-	const select = useCallback((value: boolean) => session.setBlockSelected(value), [session]);
+	const select = useCallback((value: boolean) => { if (enabled && (!canEdit || canEdit())) session.setBlockSelected(value); }, [session, enabled, canEdit]);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useTransientMessage(container);
 	const dragging = useRef(false);
 	useEffect(() => {
 		const element = container.current;
-		if (!element) return;
+		if (!element || !enabled) return;
 		const roots = containers.get(session) ?? new Set<HTMLElement>();
 		roots.add(element); containers.set(session, roots);
 		const document = element.ownerDocument;
@@ -83,18 +83,18 @@ export function useBlockSelection(session: CircuitSession, actions?: CircuitBloc
 			document.removeEventListener('drop', dragEnd, true);
 			window?.removeEventListener('blur', blur);
 			roots.delete(element);
-			if (!roots.size) { containers.delete(session); select(false); }
+			if (!roots.size) { containers.delete(session); session.setBlockSelected(false); }
 		};
-	}, [session, select]);
+	}, [session, select, enabled]);
 	const remove = () => {
-		if (!actions || busy) return;
+		if (!enabled || canEdit && !canEdit() || !actions || busy) return;
 		setBusy(true); setError('');
 		void actions.remove().catch((reason: unknown) => {
 			setError(reason instanceof Error ? reason.message : 'The circuit block could not be deleted.');
 		}).finally(() => setBusy(false));
 	};
 	const contextMenu = (event: MouseEvent) => {
-		if (!actions || eventElement(event.target)?.closest('input,textarea')) return;
+		if (!enabled || canEdit && !canEdit() || !actions || eventElement(event.target)?.closest('input,textarea')) return;
 		event.preventDefault(); event.stopPropagation(); select(true);
 		menus.add(session);
 		actions.menu(event.nativeEvent, remove, () => { menus.delete(session); });

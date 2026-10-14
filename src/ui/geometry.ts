@@ -24,7 +24,9 @@ export function terminalGeometry(label = '') {
 	const lines = rows.reduce((total, row) => total + Math.max(1, Math.ceil(Array.from(row).length / capacity)), 0);
 	const labelHeight = lines * 19;
 	const markerY = Math.ceil((labelHeight + 12) / GRID) * GRID;
-	return { width, height: markerY + 8, labelHeight, markerTop: markerY - 8, markerY, markerX: width / 2 };
+	// Keep the label close to the dot without moving the grid-aligned connector.
+	const labelTop = markerY - TERMINAL_RADIUS - 5 - labelHeight;
+	return { width, height: markerY + 8, labelHeight, labelTop, markerTop: markerY - 8, markerY, markerX: width / 2 };
 }
 
 export function sizeFor(node: Pick<CircuitNode, 'type' | 'label'>): Size {

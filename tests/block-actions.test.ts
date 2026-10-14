@@ -101,3 +101,45 @@ void test('context line insertion reports a changed-fence conflict and preserves
 	assert.equal(f.session.getSnapshot().editing, true);
 	assert.match(Notice.messages.at(-1)!, /changed in the note/);
 });
+
+void test('a stale block menu cannot insert, remove, or move after its host becomes read-only', async () => {
+	const f = fixture();
+	let editable = true;
+	let removeCalls = 0;
+	let moveCalls = 0;
+	const actions = circuitBlockActions(f.session, () => { moveCalls++; }, undefined, () => editable);
+	actions.menu({} as MouseEvent, () => { removeCalls++; });
+	const menu = Menu.last!;
+	editable = false;
+	for (const item of menu.items) item.action?.();
+	await actions.remove();
+	actions.move?.({} as DragEvent);
+	await settled();
+	assert.equal(f.text(), f.original);
+	assert.equal(f.transactions(), 0);
+	assert.equal(f.focusCount(), 0);
+	assert.equal(removeCalls, 0);
+	assert.equal(moveCalls, 0);
+});
+
+void test('a mode change while a block action waits for saves cancels its pending structural edit', async () => {
+	for (const action of ['remove', 'line'] as const) {
+		const f = fixture();
+		let editable = true;
+		let release = () => {};
+		const pending = new Promise<void>(resolve => { release = resolve; });
+		f.session.flush = () => pending;
+		const actions = circuitBlockActions(f.session, undefined, undefined, () => editable);
+		let removing: Promise<void> | undefined;
+		if (action === 'remove') removing = actions.remove();
+		else {
+			actions.menu({} as MouseEvent, () => {});
+			Menu.last!.items.find(item => item.title === 'Insert line after')!.action?.();
+		}
+		editable = false; release();
+		await removing; await settled();
+		assert.equal(f.text(), f.original);
+		assert.equal(f.transactions(), 0);
+		assert.equal(f.focusCount(), 0);
+	}
+});

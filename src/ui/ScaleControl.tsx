@@ -60,8 +60,11 @@ export function ScaleControl({ scale, maximum, disabled, commit }: {
 			onBlur={() => { focused.current = false; if (confirm() && !invalid) setDraft(percentage(scale)); }}
 			onKeyDown={event => {
 				event.stopPropagation();
-				if (event.key === 'Escape') { event.preventDefault(); completed.current = true; restore(); event.currentTarget.blur(); }
-				if (event.key === 'Enter') { event.preventDefault(); if (confirm()) event.currentTarget.blur(); }
+				// Explicit completion keeps later circuit shortcuts on this widget.
+				// Ordinary blur still leaves focus with the user's outside target.
+				const focusCircuit = () => event.currentTarget.closest<HTMLElement>('.logic-circuit')?.focus({ preventScroll: true });
+				if (event.key === 'Escape') { event.preventDefault(); completed.current = true; restore(); focusCircuit(); }
+				if (event.key === 'Enter') { event.preventDefault(); if (confirm()) focusCircuit(); }
 			}} />
 		<span aria-hidden="true">%</span>
 		{invalid && <span className="logic-scale-validation" id={validationId} role="alert">Enter a percentage from {MIN_SCALE * 100} to {MAX_SCALE * 100}.</span>}

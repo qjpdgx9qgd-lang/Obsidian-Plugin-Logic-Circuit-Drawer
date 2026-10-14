@@ -2,7 +2,7 @@ import { StateField } from '@codemirror/state';
 import type { EditorState, Extension } from '@codemirror/state';
 import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view';
 import type { DecorationSet, ViewUpdate } from '@codemirror/view';
-import { editorInfoField, editorLivePreviewField } from 'obsidian';
+import { editorInfoField, editorLivePreviewField, MarkdownView } from 'obsidian';
 import type { Editor, TFile } from 'obsidian';
 import { scanCircuitBlocks } from '../storage/blocks';
 import { mountCircuit } from '../ui/mount';
@@ -10,20 +10,36 @@ import type { SessionManager } from './session-manager';
 import type { CircuitSession } from './session';
 import { circuitBlockActions } from './block-actions';
 import { cancelBlockDrag, circuitBlockDragExtension, startBlockDrag } from './block-drag';
+import { preserveResizeScroll } from './resize-scroll';
+import { preserveCircuitFocus } from './focus-continuity';
+import { circuitBoundaryDeleteExtension } from './circuit-boundary-delete';
 
 class CircuitWidget extends WidgetType {
 	private unmount: (() => void) | undefined;
+	private disposeResizeScroll: (() => void) | undefined;
 	constructor(private readonly session: CircuitSession, private readonly manager: SessionManager) { super(); }
 	eq(other: CircuitWidget): boolean { return this.session === other.session; }
 	toDOM(view: EditorView): HTMLElement {
 		const element = view.dom.ownerDocument.createElement('div');
 		element.className = 'logic-circuit-widget';
-		this.unmount = mountCircuit(element, this.session, this.manager, circuitBlockActions(this.session,
-			event => startBlockDrag(this.session, element.ownerDocument, event), () => cancelBlockDrag(element.ownerDocument)));
+		const pane = this.manager.editorPane(this.session.host.editor!);
+		const canEdit = () => view.dom.isConnected && !!view.state.field(editorLivePreviewField, false)
+			&& (!(pane instanceof MarkdownView) || pane.file === this.session.host.file && pane.getMode() === 'source');
+		const actions = circuitBlockActions(this.session,
+			event => startBlockDrag(this.session, element.ownerDocument, event), () => cancelBlockDrag(element.ownerDocument), canEdit);
+		const currentView = () => canEdit() ? view : undefined;
+		const cleanup = (callback: () => void) => this.manager.trackCleanup(callback);
+		const resizeScroll = preserveResizeScroll(currentView, element, this.session, cleanup);
+		const focus = preserveCircuitFocus(currentView, element, this.session, canEdit, cleanup);
+		actions.beforeResize = resizeScroll.beforeResize;
+		actions.afterResize = () => { focus.afterRender(); resizeScroll.afterResize(); };
+		const dispose = () => { focus.dispose(); resizeScroll.dispose(); };
+		this.disposeResizeScroll = dispose;
+		this.unmount = mountCircuit(element, this.session, this.manager, actions, dispose);
 		return element;
 	}
 	ignoreEvent(): boolean { return true; }
-	destroy(): void { this.unmount?.(); }
+	destroy(): void { this.disposeResizeScroll?.(); this.unmount?.(); }
 }
 
 export function livePreviewExtension(manager: SessionManager): Extension {
@@ -70,6 +86,7 @@ export function livePreviewExtension(manager: SessionManager): Extension {
 	});
 	return [field,
 		EditorView.atomicRanges.of((view) => view.state.field(field).decorations),
+		circuitBoundaryDeleteExtension((view) => view.state.field(field).decorations),
 		ViewPlugin.fromClass(class {
 			private editor: Editor | undefined;
 			private release: (() => void) | undefined;
@@ -78,7 +95,7 @@ export function livePreviewExtension(manager: SessionManager): Extension {
 				const editor = view.state.field(editorInfoField, false)?.editor;
 				if (editor === this.editor) return;
 				const previous = this.release;
-				this.editor = editor; this.release = editor ? manager.retainEditor(editor) : undefined;
+				this.editor = editor; this.release = editor ? manager.retainEditor(editor, view) : undefined;
 				previous?.();
 			}
 			update(update: ViewUpdate): void { this.sync(update.view); }

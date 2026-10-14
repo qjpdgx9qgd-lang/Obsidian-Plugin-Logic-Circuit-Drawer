@@ -16,12 +16,16 @@ export async function sessionBlockBaseline(session: CircuitSession, text: string
 	return structuralBaseline(text, block);
 }
 
-export function circuitBlockActions(session: CircuitSession, move?: CircuitBlockActions['move'], cancelMove?: () => void): CircuitBlockActions {
+export function circuitBlockActions(session: CircuitSession, move?: CircuitBlockActions['move'], cancelMove?: () => void, canEdit: () => boolean = () => true): CircuitBlockActions {
 	const insertLine = async (side: 'before' | 'after'): Promise<void> => {
+		if (!canEdit()) return;
 		await session.flush();
+		if (!canEdit()) return;
 		const { store, file, editor } = session.host;
 		const text = await store.read(file, editor);
-		await store.insertBlockLine(file, editor, await sessionBlockBaseline(session, text), side);
+		const baseline = await sessionBlockBaseline(session, text);
+		if (!canEdit()) return;
+		await store.insertBlockLine(file, editor, baseline, side);
 		session.setBlockSelected(false);
 		await session.finish();
 	};
@@ -32,20 +36,25 @@ export function circuitBlockActions(session: CircuitSession, move?: CircuitBlock
 	};
 	return {
 		remove: async () => {
+			if (!canEdit()) return;
 			await session.flush();
+			if (!canEdit()) return;
 			const { store, file, editor } = session.host;
 			const text = await store.read(file, editor);
-			await store.deleteBlock(file, editor, await sessionBlockBaseline(session, text));
+			const baseline = await sessionBlockBaseline(session, text);
+			if (!canEdit()) return;
+			await store.deleteBlock(file, editor, baseline);
 		},
 		menu: (event, remove, onClose?: () => void) => {
+			if (!canEdit()) { onClose?.(); return; }
 			const menu = new Menu();
 			menu.onHide(() => onClose?.());
 			menu.addItem(item => item.setTitle('Insert line before').setIcon('arrow-up').onClick(() => addLine('before')));
 			menu.addItem(item => item.setTitle('Insert line after').setIcon('arrow-down').onClick(() => addLine('after')));
-			menu.addItem(item => item.setTitle('Delete circuit block').setIcon('trash-2').setWarning(true).onClick(remove));
+			menu.addItem(item => item.setTitle('Delete circuit block').setIcon('trash-2').setWarning(true).onClick(() => { if (canEdit()) remove(); }));
 			menu.showAtMouseEvent(event);
 		},
-		move,
+		move: move ? event => { if (canEdit()) move(event); } : undefined,
 		cancelMove,
 	};
 }
