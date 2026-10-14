@@ -1,7 +1,7 @@
 {
 	"id": "logic-circuits",
 	"name": "Logic circuits",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"minAppVersion": "1.8.0",
 	"description": "Draw and edit digital logic circuits directly inside Markdown notes.",
 	"isDesktopOnly": true,
