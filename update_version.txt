@@ -1,0 +1,3 @@
+the command to update version is:
+npm version x.x.x --no-git-tag-version
+npm run package
