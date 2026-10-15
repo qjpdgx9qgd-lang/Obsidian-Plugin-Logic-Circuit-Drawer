@@ -14,6 +14,8 @@ This checkout is already in a test vault's plugin folder. Running `npm run build
 
 The permanent plugin ID is `logic-circuits`; the installed folder must use that name. Obsidian 1.8.0 or newer is required. The first release supports desktop only.
 
+If a community installation shows unstyled controls or overlapping circuit objects, check that its plugin folder contains `styles.css` alongside `main.js` and `manifest.json`. The stylesheet is required for the circuit layout. Reinstall from a release containing all three files, or copy `styles.css` from the matching release into the plugin folder and reload the plugin.
+
 ## Usage
 
 - In an editable Markdown note, use **Cmd + Shift + L** on macOS or **Ctrl + Shift + L** on Windows/Linux, run **Logic circuits: Insert logic circuit** from the command palette, or select **Insert logic circuit** from the note's right-click menu. Change the default shortcut through **Settings → Hotkeys** if desired.
@@ -74,6 +76,8 @@ npm run package
 Sources are separated into `src/model/`, `src/storage/`, `src/ui/`, and `src/integration/`. React and React Flow are bundled into `main.js`; Obsidian supplies the external CodeMirror runtime. The build combines React Flow's base stylesheet and `src/ui/styles.css` into shipped `styles.css`.
 
 The build removes React DOM's unused script loaders and script-rendering paths, rejects dynamic script tags and raw HTML, and checks the emitted bundle for script creation. [scripts/no-runtime-scripts.mjs](scripts/no-runtime-scripts.mjs) verifies the audited React DOM source before transforming it; dependency upgrades require reviewing these paths and updating the audited hashes. Development and production builds use the same restrictions, covered by `npm run test:ui -- runtime-scripts`.
+
+For a community release, attach `main.js`, `manifest.json`, and `styles.css` as individual GitHub release assets. Uploading a packaged folder or only the JavaScript and manifest leaves community installations without the required layout styles. The release workflow checks that all three files are nonempty and includes the stylesheet in every draft release.
 
 ## Initial limitations
 

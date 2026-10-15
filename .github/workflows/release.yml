@@ -26,17 +26,18 @@ jobs:
                   npm ci
                   npm run package
 
-            - name: Check for optional styles
-              id: styles
+            - name: Verify required release files
               run: |
-                  [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
+                  test -s main.js
+                  test -s manifest.json
+                  test -s styles.css
 
             - name: Attest build provenance
               uses: actions/attest@v4
               with:
                   subject-path: |
                       main.js
-                      ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
+                      styles.css
 
             - name: Create release
               env:
@@ -47,4 +48,4 @@ jobs:
                   gh release create "$tag" \
                     --title="$tag" \
                     --draft \
-                    main.js manifest.json LICENSE THIRD-PARTY-NOTICES.txt ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
+                    main.js manifest.json styles.css LICENSE THIRD-PARTY-NOTICES.txt
