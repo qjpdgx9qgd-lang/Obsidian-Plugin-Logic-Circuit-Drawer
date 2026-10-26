@@ -3,19 +3,31 @@ import type { CircuitData, CircuitEdge, CircuitNode, NodeType } from './types';
 export const MIN_SCALE = 0.25;
 export const MAX_SCALE = 3;
 export const MAX_LABEL_LENGTH = 200;
+export const MAX_BLACKBOX_PINS = 8;
 // Keep malformed source from overflowing layout arithmetic or exhausting the renderer.
 export const MAX_POSITION = 10_000;
 export const MAX_NODES = 1_000;
 export const MAX_EDGES = 5_000;
-const NODE_TYPES: readonly string[] = ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor', 'input', 'output', 'junction'];
+const NODE_TYPES: readonly string[] = ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor', 'input', 'output', 'junction', 'blackbox'];
+
+export interface BlackBoxConfig { inputCount?: number; outputCount?: number }
 
 export class CircuitValidationError extends Error {
 	constructor(message: string) { super(message); this.name = 'CircuitValidationError'; }
 }
 
-export function pinsFor(type: NodeType): { inputs: string[]; outputs: string[] } {
+/** Black boxes expose a user-chosen number of identically named pins on both sides. */
+export function pinsFor(type: NodeType, config: BlackBoxConfig = {}): { inputs: string[]; outputs: string[] } {
 	if (type === 'input') return { inputs: [], outputs: ['out'] };
 	if (type === 'output') return { inputs: ['in-1'], outputs: [] };
+	if (type === 'blackbox') {
+		const inputs = config.inputCount ?? 0;
+		const outputs = config.outputCount ?? 0;
+		return {
+			inputs: Array.from({ length: inputs }, (_, index) => `in-${index + 1}`),
+			outputs: Array.from({ length: outputs }, (_, index) => `out-${index + 1}`),
+		};
+	}
 	return { inputs: type === 'not' || type === 'junction' ? ['in-1'] : ['in-1', 'in-2'], outputs: ['out'] };
 }
 
@@ -44,17 +56,34 @@ function coordinate(value: unknown, name: string): number {
 	return result;
 }
 
+function count(value: unknown, name: string): number {
+	if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > MAX_BLACKBOX_PINS) {
+		fail(`${name} must be a whole number between 0 and ${MAX_BLACKBOX_PINS}.`);
+	}
+	return value;
+}
+
 function node(value: unknown): CircuitNode {
 	const name = 'Node';
-	const item = record(value, name, ['id', 'type', 'position', 'label']);
+	const item = record(value, name, ['id', 'type', 'position', 'label', 'inputCount', 'outputCount']);
 	if (typeof item.type !== 'string' || !NODE_TYPES.includes(item.type)) fail(`${name} has an unsupported type.`);
 	const type = item.type as NodeType;
 	const position = record(item.position, `${name} position`, ['x', 'y']);
 	const result: CircuitNode = { id: id(item.id, `${name} ID`), type, position: { x: coordinate(position.x, `${name} x`), y: coordinate(position.y, `${name} y`) } };
 	if (Object.prototype.hasOwnProperty.call(item, 'label')) {
-		if (type !== 'input' && type !== 'output') fail(`${name}: only Input and Output terminals can have labels.`);
+		if (type !== 'input' && type !== 'output' && type !== 'blackbox') fail(`${name}: only terminal and black box nodes can have labels.`);
 		if (typeof item.label !== 'string' || item.label.length > MAX_LABEL_LENGTH) fail(`${name} label must be text of at most ${MAX_LABEL_LENGTH} characters.`);
 		result.label = item.label;
+	}
+	if (type === 'blackbox') {
+		if (!Object.prototype.hasOwnProperty.call(item, 'inputCount') || !Object.prototype.hasOwnProperty.call(item, 'outputCount')) {
+			fail('A black box must declare its input and output counts.');
+		}
+		result.inputCount = count(item.inputCount, `${name} input count`);
+		result.outputCount = count(item.outputCount, `${name} output count`);
+	}
+	else if (Object.prototype.hasOwnProperty.call(item, 'inputCount') || Object.prototype.hasOwnProperty.call(item, 'outputCount')) {
+		fail(`${name}: only black boxes can declare input and output counts.`);
 	}
 	return result;
 }
@@ -86,8 +115,8 @@ export function validateConnections(data: CircuitData): void {
 		// every other wire. Junction-only cycles are checked separately below.
 		if (source.type === 'output') fail('An Output node cannot start a connection.');
 		if (target.type === 'input') fail('An output pin cannot be connected to an Input node.');
-		if (!pinsFor(source.type).outputs.includes(wire.sourcePinId)
-			|| !pinsFor(target.type).inputs.includes(wire.targetPinId)) fail('Connect an output pin to an input pin.');
+		if (!pinsFor(source.type, source).outputs.includes(wire.sourcePinId)
+			|| !pinsFor(target.type, target).inputs.includes(wire.targetPinId)) fail('Connect an output pin to an input pin.');
 		const connectionKey = JSON.stringify([source.id, wire.sourcePinId, target.id, wire.targetPinId]);
 		if (connections.has(connectionKey)) fail('This connection already exists.');
 		connections.add(connectionKey);

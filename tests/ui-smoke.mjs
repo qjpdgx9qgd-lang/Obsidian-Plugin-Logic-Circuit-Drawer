@@ -681,6 +681,37 @@ try {
 	await waitNodes(3);
 	assert.ok((await data()).nodes.some(node => node.type === 'nor'), 'dropping in the extended area places the node');
 	console.log('Passed: ten-point zoom steps, compact blocks, and fixed-top live height growth/contraction during node movement and placement.');
+
+	await page.evaluate(() => window.circuitTest.showBlackBoxFixture());
+	await page.locator('.logic-object-blackbox').waitFor();
+	const boxStart = await page.locator('.logic-object-blackbox').boundingBox();
+	assert.ok(Math.abs(boxStart.width - boxStart.height) < .5, 'black box is square');
+	assert.equal(await page.locator('.logic-object-blackbox .logic-pin').count(), 5, 'black box exposes three inputs and two outputs');
+	await block.hover();
+	await page.getByRole('button', { name: 'Edit', exact: true }).click();
+	await page.getByRole('button', { name: 'Done', exact: true }).waitFor();
+	await page.locator('.logic-object-blackbox .logic-blackbox-label').dblclick();
+	await page.getByRole('textbox', { name: 'Edit blackbox label' }).fill('FA2');
+	await page.getByRole('textbox', { name: 'Edit blackbox label' }).press('Enter');
+	await page.waitForFunction(() => window.circuitTest.data().nodes.find(node => node.id === 'bb-fa').label === 'FA2');
+	await page.locator('.logic-object-blackbox').hover();
+	await page.getByRole('button', { name: 'Configure black box' }).click();
+	let blackBoxDialog = page.getByRole('dialog', { name: 'Configure black box' });
+	await blackBoxDialog.getByRole('spinbutton', { name: 'Outputs' }).fill('5');
+	await blackBoxDialog.getByRole('button', { name: 'Save', exact: true }).click();
+	await page.waitForFunction(() => window.circuitTest.data().nodes.find(node => node.id === 'bb-fa').outputCount === 5);
+	await page.waitForFunction(width => document.querySelector('.logic-object-blackbox').getBoundingClientRect().width > width + 30, boxStart.width);
+	assert.equal(await page.locator('.logic-object-blackbox .logic-pin').count(), 8, 'five outputs add three handles');
+	await page.locator('.logic-object-blackbox').hover();
+	await page.getByRole('button', { name: 'Configure black box' }).click();
+	blackBoxDialog = page.getByRole('dialog', { name: 'Configure black box' });
+	await blackBoxDialog.getByRole('spinbutton', { name: 'Inputs' }).fill('0');
+	await blackBoxDialog.getByRole('button', { name: 'Save', exact: true }).click();
+	await blackBoxDialog.getByRole('alert').waitFor();
+	assert.match(await blackBoxDialog.getByRole('alert').innerText(), /Disconnect wires/);
+	assert.equal((await data()).nodes.find(node => node.id === 'bb-fa').inputCount, 3, 'removing a wired pin is refused');
+	await blackBoxDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+	console.log('Passed: black boxes render square with configurable pins and editable labels.');
 	assert.deepEqual(errors, []);
 	console.log(`Browser artifacts: ${directory}`);
 } catch (error) {

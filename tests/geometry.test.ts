@@ -132,3 +132,26 @@ void test('fit bounds contain multiline terminal labels, junction markers and co
 		edgeWirePoints(source, edge.sourcePinId, target, edge.targetPinId).forEach(inside);
 	}
 });
+
+void test('black boxes stay square and place each requested pin on its side', () => {
+	const node: CircuitNode = { id: 'fa', type: 'blackbox', label: 'FA', inputCount: 3, outputCount: 2, position: { x: 128, y: 96 } };
+	const size = sizeFor(node);
+	assert.equal(size.width, size.height);
+	assert.ok(size.width >= 80 && size.width % GRID === 0);
+	for (let index = 1; index <= 3; index++) {
+		const point = localPinPoint(node, `in-${index}`);
+		assert.equal(point.x, 0);
+		assert.ok(point.y > 0 && point.y < size.height);
+		assert.equal((node.position.y + point.y) % GRID, 0);
+	}
+	for (let index = 1; index <= 2; index++) {
+		const point = localPinPoint(node, `out-${index}`);
+		assert.equal(point.x, size.width);
+		assert.ok(point.y > 0 && point.y < size.height);
+	}
+	assert.deepEqual(nodeSnapReference(node), { x: size.width / 2, y: size.width / 2 });
+	assert.ok(sizeFor({ type: 'blackbox', label: 'U', inputCount: 8, outputCount: 8 }).width > size.width);
+	const bounds = boundsFor({ ...newCircuit(), nodes: [node] });
+	assert.equal(bounds.maxX - node.position.x, size.width);
+	assert.equal(bounds.maxY - bounds.minY, size.height);
+});

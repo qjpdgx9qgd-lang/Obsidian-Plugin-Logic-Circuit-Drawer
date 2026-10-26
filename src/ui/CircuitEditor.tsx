@@ -1,12 +1,12 @@
 import { applyNodeChanges, applyEdgeChanges, Background, BackgroundVariant, ConnectionMode, ConnectionLineType, ReactFlow, ReactFlowProvider, useReactFlow, useStoreApi, type Connection, type NodeChange, type EdgeChange } from '@xyflow/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CircuitSession } from '../integration/session';
-import { connect, branchEdge, createId, deleteElements, MIN_SCALE, MAX_SCALE } from '../model/circuit';
+import { connect, branchEdge, createId, deleteElements, reconfigureBlackbox, MIN_SCALE, MAX_SCALE } from '../model/circuit';
 import type { CircuitData, CircuitNode, NodeType } from '../model/types';
 import { CircuitObject, type FlowNode } from './CircuitNode';
 import { CircuitWire, type FlowEdge } from './CircuitWire';
 import { DiagramContext } from './context';
-import { boundsFor, edgeWirePoints, GRID, nearestOnWire, PADDING, pathFor, routedWirePoints, sizeFor, terminalLabel, type Point } from './geometry';
+import { blackBoxLabel, boundsFor, edgeWirePoints, GRID, nearestOnWire, PADDING, pathFor, routedWirePoints, sizeFor, terminalLabel, type Point } from './geometry';
 import { CircuitToolbar, PLACEMENT_MIME } from './Toolbar';
 import { GateSymbol } from './GateSymbol';
 import { useBranching } from './useBranching';
@@ -20,9 +20,20 @@ import { flowHandlesFor, logicalJunctionPin, normalizeFlowConnection } from './j
 import { BlockTools, type CircuitBlockActions } from './BlockTools';
 import { TRANSIENT_MESSAGE_MS, useBlockSelection, useTransientMessage } from './useBlockSelection';
 import { AccessibleButton, useAccessibleLabel } from './accessibility';
+import { BlackBoxDialog, type BlackBoxValues } from './BlackBoxDialog';
 
 const nodeTypes = { circuit: CircuitObject };
 const edgeTypes = { wire: CircuitWire };
+const DEFAULT_BLACKBOX_INPUTS = 2;
+const DEFAULT_BLACKBOX_OUTPUTS = 1;
+type PreviewNode = Pick<CircuitNode, 'type' | 'label' | 'inputCount' | 'outputCount'>;
+
+/** The placement preview uses the same defaults the dialog starts from. */
+function previewNodeFor(circuit: CircuitData, type: NodeType): PreviewNode {
+	return type === 'blackbox'
+		? { type, label: blackBoxLabel(circuit), inputCount: DEFAULT_BLACKBOX_INPUTS, outputCount: DEFAULT_BLACKBOX_OUTPUTS }
+		: { type, label: terminalLabel(circuit, type) };
+}
 
 export function CircuitEditor({ session, blockActions, readOnly = false, canEdit }: {
 	session: CircuitSession;
@@ -63,6 +74,7 @@ function Diagram({ session, snapshot, circuit, blockActions, readOnly, canEdit }
 	const [edges, setEdges] = useState<FlowEdge[]>(() => makeEdges(circuit, undefined, wireName.id));
 	const [tool, setTool] = useState<NodeType | null>(null);
 	const [preview, setPreview] = useState<{ position: Point; valid: boolean } | null>(null);
+	const [blackBoxDraft, setBlackBoxDraft] = useState<{ position: Point; node?: CircuitNode } | null>(null);
 	const [message, setMessage] = useTransientMessage(container);
 	const [connecting, setConnecting] = useState(false);
 	const connectionCancelled = useRef(false);
@@ -79,7 +91,8 @@ function Diagram({ session, snapshot, circuit, blockActions, readOnly, canEdit }
 	const fitScale = Math.min(MAX_SCALE, Math.max(0.001, (width - PADDING * 2) / bounds.width));
 	const scale = Math.min(circuit.view.preferredScale, fitScale);
 	const viewport = useMemo(() => ({ x: PADDING - bounds.minX * scale, y: PADDING - top * scale, zoom: scale }), [bounds.minX, top, scale]);
-	const previewBottom = tool && preview?.valid ? preview.position.y + sizeFor({ type: tool, label: terminalLabel(circuit, tool) }).height : top;
+	const previewNode = tool ? previewNodeFor(circuit, tool) : null;
+	const previewBottom = previewNode && preview?.valid ? preview.position.y + sizeFor(previewNode).height : top;
 	const bottom = Math.max(liveBounds.maxY, previewBottom);
 	const height = Math.max(nodes.length || preview?.valid ? 64 : 128, Math.ceil((bottom - top) * scale + PADDING * 2));
 	// Notify the note host only after React has applied the node's new bounds.
@@ -125,11 +138,11 @@ function Diagram({ session, snapshot, circuit, blockActions, readOnly, canEdit }
 		const timeout = window.setTimeout(() => session.dismissTransientError(snapshot.actionErrorId), TRANSIENT_MESSAGE_MS);
 		return () => window.clearTimeout(timeout);
 	}, [container, session, snapshot.error, snapshot.actionErrorId]);
-	useEffect(() => { if (!editing) { setTool(null); setPreview(null); setHovered(null); setConnecting(false); } }, [editing]);
+	useEffect(() => { if (!editing) { setTool(null); setPreview(null); setHovered(null); setConnecting(false); setBlackBoxDraft(null); } }, [editing]);
 	useEffect(() => { if (readOnly) blockActions?.cancelMove?.(); }, [readOnly, blockActions]);
-	const constrain = (position: Point, node: Pick<CircuitNode, 'type' | 'label'>) => constrainNodePosition(node, position, { left: bounds.minX, top, width: (width - PADDING * 2) / scale });
+	const constrain = (position: Point, node: Pick<CircuitNode, 'type' | 'label' | 'inputCount' | 'outputCount'>) => constrainNodePosition(node, position, { left: bounds.minX, top, width: (width - PADDING * 2) / scale });
 	const placement = (point: Point, type: NodeType) => {
-		const node = { type, label: terminalLabel(circuit, type) };
+		const node = previewNodeFor(circuit, type);
 		const size = sizeFor(node);
 		const position = constrain({ x: point.x - size.width / 2, y: point.y - size.height / 2 }, node);
 		const valid = position.x >= bounds.minX && position.x + size.width <= bounds.minX + (width - PADDING * 2) / scale && point.y >= top;
@@ -140,9 +153,37 @@ function Diagram({ session, snapshot, circuit, blockActions, readOnly, canEdit }
 		if (!writable()) return;
 		const next = placement(point, type);
 		if (!next.valid) { setMessage('Place the object inside the diagram bounds.'); return; }
+		setTool(null); setPreview(null);
+		if (type === 'blackbox') {
+			setBlackBoxDraft({ position: next.position });
+			return;
+		}
 		const label = terminalLabel(circuit, type);
 		commit({ ...circuit, nodes: [...circuit.nodes, { id: createId(), type, position: next.position, ...(label === undefined ? {} : { label }) }] });
-		setTool(null); setPreview(null); container.current?.focus({ preventScroll: true });
+		container.current?.focus({ preventScroll: true });
+	};
+	const configureBlackbox = (node: CircuitNode) => {
+		if (!writable() || locked) return;
+		setTool(null); setPreview(null); setBlackBoxDraft({ position: node.position, node });
+	};
+	const submitBlackbox = (values: BlackBoxValues): string | null => {
+		if (!writable() || locked || !blackBoxDraft) return 'This circuit is unavailable right now.';
+		try {
+			if (blackBoxDraft.node) {
+				commit(reconfigureBlackbox(circuit, blackBoxDraft.node.id, values));
+			}
+			else {
+				const node: CircuitNode = {
+					id: createId(), type: 'blackbox', position: blackBoxDraft.position,
+					label: values.label, inputCount: values.inputCount, outputCount: values.outputCount,
+				};
+				commit({ ...circuit, nodes: [...circuit.nodes, node] });
+			}
+		}
+		catch (error) { return error instanceof Error ? error.message : 'The black box could not be saved.'; }
+		setBlackBoxDraft(null);
+		container.current?.focus({ preventScroll: true });
+		return null;
 	};
 	const removeSelection = () => {
 		const selectedNodes = nodes.filter(node => node.selected).map(node => node.id);
@@ -242,10 +283,10 @@ function Diagram({ session, snapshot, circuit, blockActions, readOnly, canEdit }
 		}} onDrop={event => {
 			if (!editing) return;
 			const type = event.dataTransfer.getData(PLACEMENT_MIME) as NodeType;
-			if (!['and','or','not','nand','nor','xor','xnor','input','output'].includes(type)) return;
+			if (!['and','or','not','nand','nor','xor','xnor','blackbox','input','output'].includes(type)) return;
 			event.preventDefault(); event.stopPropagation(); place(toPoint({ x: event.clientX, y: event.clientY }), type);
 		}}>
-			<DiagramContext.Provider value={{ editing, scale, wireRoutes: liveBounds.wireRoutes, connecting, hovered: wireHover, toPoint, hoverWire, startBranch, label: (node, value) => run(() => commit({ ...circuit, nodes: circuit.nodes.map(item => item.id === node.id ? { ...item, label: value } : item) })) }}>
+			<DiagramContext.Provider value={{ editing, scale, wireRoutes: liveBounds.wireRoutes, connecting, hovered: wireHover, toPoint, hoverWire, startBranch, label: (node, value) => run(() => commit({ ...circuit, nodes: circuit.nodes.map(item => item.id === node.id ? { ...item, label: value } : item) })), configure: configureBlackbox }}>
 				<ReactFlow<FlowNode, FlowEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={changeNodes} onEdgesChange={changeEdges} nodeDragThreshold={0} onNodeDragStart={() => { dragMoved.current = false; blockActions?.beforeResize?.(true); }} onNodeDrag={() => { dragMoved.current = true; }} onNodeDragStop={(_event, node, draggedNodes) => {
 					if (!editing || !writable() || !dragMoved.current) return;
 					// The stop event is authoritative even before controlled-node state flushes.
@@ -276,10 +317,21 @@ function Diagram({ session, snapshot, circuit, blockActions, readOnly, canEdit }
 				</ReactFlow>
 			</DiagramContext.Provider>
 			{!circuit.nodes.length && !tool && <div className="logic-empty">{readOnly ? 'An empty circuit.' : editorOpen ? 'Select a gate, then click to place it.' : 'An empty circuit. Double-click or select Edit to begin.'}</div>}
-			{editing && tool && preview && <div className={`logic-placement-preview${preview.valid ? '' : ' is-invalid'}`} style={{ left: viewport.x + preview.position.x * scale, top: viewport.y + preview.position.y * scale, width: sizeFor({ type: tool, label: terminalLabel(circuit, tool) }).width * scale, height: sizeFor({ type: tool, label: terminalLabel(circuit, tool) }).height * scale }}>{tool === 'input' || tool === 'output' ? <TerminalPreview type={tool} label={terminalLabel(circuit, tool) ?? ''} scale={scale} /> : <GateSymbol type={tool} />}</div>}
+			{editing && tool && preview && previewNode && <div className={`logic-placement-preview${preview.valid ? '' : ' is-invalid'}`} style={{ left: viewport.x + preview.position.x * scale, top: viewport.y + preview.position.y * scale, width: sizeFor(previewNode).width * scale, height: sizeFor(previewNode).height * scale }}>{tool === 'input' || tool === 'output' ? <TerminalPreview type={tool} label={terminalLabel(circuit, tool) ?? ''} scale={scale} /> : tool === 'blackbox' ? <div className="logic-blackbox-preview"><span>{previewNode.label}</span></div> : <GateSymbol type={tool} />}</div>}
 			{branch.branch && <svg className="logic-branch-preview" style={{ width, height }}><path d={pathFor(routedWirePoints(branch.branch.origin, branch.branch.pointer, 'junction').map(point => ({ x: viewport.x + point.x * scale, y: viewport.y + point.y * scale })))} /></svg>}
 		</div>
-		{editorOpen && <div className="logic-editor-hint"><span>{tool ? 'Click to place · Esc to cancel' : 'Drag pins to connect · Double-click terminal labels to edit'}</span><span className="logic-save-status" role="status">{snapshot.conflict ? 'Draft preserved' : snapshot.saving ? 'Saving…' : 'Saved'}</span></div>}
+		{editorOpen && <div className="logic-editor-hint"><span>{tool ? 'Click to place · Esc to cancel' : 'Drag pins to connect · Double-click labels to edit'}</span><span className="logic-save-status" role="status">{snapshot.conflict ? 'Draft preserved' : snapshot.saving ? 'Saving…' : 'Saved'}</span></div>}
+		{editorOpen && blackBoxDraft && <BlackBoxDialog
+			key={`${blackBoxDraft.node?.id ?? 'new'}-${blackBoxDraft.position.x}-${blackBoxDraft.position.y}`}
+			existing={Boolean(blackBoxDraft.node)}
+			initial={{
+				label: blackBoxDraft.node?.label ?? blackBoxLabel(circuit),
+				inputCount: blackBoxDraft.node?.inputCount ?? DEFAULT_BLACKBOX_INPUTS,
+				outputCount: blackBoxDraft.node?.outputCount ?? DEFAULT_BLACKBOX_OUTPUTS,
+			}}
+			submit={submitBlackbox}
+			cancel={() => { setBlackBoxDraft(null); container.current?.focus({ preventScroll: true }); }}
+		/>}
 	</div>;
 }
 

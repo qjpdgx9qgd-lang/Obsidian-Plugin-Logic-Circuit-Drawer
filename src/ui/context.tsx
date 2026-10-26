@@ -12,6 +12,7 @@ export interface DiagramInteractions {
 	hoverWire: (edgeId: string, point: Point | null) => void;
 	startBranch: (edgeId: string, point: Point, event: PointerEvent) => void;
 	label: (node: CircuitNode, value: string) => void;
+	configure: (node: CircuitNode) => void;
 }
 
 export const DiagramContext = createContext<DiagramInteractions | null>(null);

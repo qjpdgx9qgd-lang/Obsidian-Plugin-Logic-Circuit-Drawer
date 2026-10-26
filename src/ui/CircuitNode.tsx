@@ -11,16 +11,18 @@ import { useAccessibleLabel } from './accessibility';
 export type FlowNode = Node<{ model: CircuitNode }, 'circuit'>;
 
 export function CircuitObject({ data, selected }: NodeProps<FlowNode>) {
-	const { editing, scale, label } = useDiagram();
+	const { editing, scale, label, configure } = useDiagram();
 	const node = data.model;
 	const size = sizeFor(node);
-	const pins = pinsFor(node.type);
+	const pins = pinsFor(node.type, node);
 	const [labelEditing, setLabelEditing] = useState(false);
 	const [draft, setDraft] = useState(node.label ?? '');
 	const cancelled = useRef(false);
 	useEffect(() => { if (!editing) { cancelled.current = true; setLabelEditing(false); } }, [editing]);
 	const terminal = node.type === 'input' || node.type === 'output';
-	const name = useAccessibleLabel(terminal ? `${node.type}: ${node.label ?? ''}` : node.type.toUpperCase());
+	const blackbox = node.type === 'blackbox';
+	const labelled = terminal || blackbox;
+	const name = useAccessibleLabel(terminal ? `${node.type}: ${node.label ?? ''}` : blackbox ? `Black box: ${node.label ?? ''}` : node.type.toUpperCase());
 	const labelName = useAccessibleLabel(`Edit ${node.type} label`);
 	const pinLabels = useId();
 	const terminalSize = terminalGeometry(node.label);
@@ -29,22 +31,32 @@ export function CircuitObject({ data, selected }: NodeProps<FlowNode>) {
 		cancelled.current = true;
 		setLabelEditing(false);
 	};
+	const labelField = (className: string) => <textarea autoFocus className={`logic-label-input nodrag nopan nowheel ${className}`} value={draft} maxLength={200} rows={blackbox ? 2 : 1} aria-labelledby={labelName.id} onChange={event => setDraft(event.target.value)} onBlur={confirmLabel} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
+		event.stopPropagation();
+		// The textarea disappears on completion; retain keyboard routing
+		// on the persistent circuit instead of falling back to the body.
+		const focusCircuit = () => event.currentTarget.closest<HTMLElement>('.logic-circuit')?.focus({ preventScroll: true });
+		if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); confirmLabel(); focusCircuit(); }
+		if (event.key === 'Escape') { event.preventDefault(); cancelled.current = true; setLabelEditing(false); focusCircuit(); }
+	}} />;
 	return <div className={`logic-object logic-object-${node.type}${selected && editing ? ' is-selected' : ''}`} role="group" style={{ width: size.width, height: size.height }} aria-labelledby={name.id}>
 		{name.label}
-		{terminal && labelEditing && labelName.label}
+		{labelled && labelEditing && labelName.label}
 		{node.type === 'junction' ? <span className="logic-junction-dot" />
+			: blackbox ? <>
+				<div className="logic-blackbox" onDoubleClick={event => {
+					if (!editing) return;
+					event.stopPropagation(); cancelled.current = false; setDraft(node.label ?? ''); setLabelEditing(true);
+				}}>
+					{editing && labelEditing ? labelField('logic-blackbox-label-input') : <span className="logic-blackbox-label">{node.label || '\u00a0'}</span>}
+				</div>
+				{editing && !labelEditing && <button type="button" className="logic-blackbox-configure nodrag nopan" title="Configure black box" aria-label="Configure black box" onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); configure(node); }}>⚙</button>}
+			</>
 			: terminal ? <><div className="logic-terminal-body" style={{ top: terminalSize.labelTop, height: terminalSize.labelHeight }} onDoubleClick={event => {
 				if (!editing) return;
 				event.stopPropagation(); cancelled.current = false; setDraft(node.label ?? ''); setLabelEditing(true);
 			}}>
-				{editing && labelEditing ? <textarea autoFocus className="logic-label-input nodrag nopan nowheel" value={draft} maxLength={200} rows={1} aria-labelledby={labelName.id} onChange={event => setDraft(event.target.value)} onBlur={confirmLabel} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
-					event.stopPropagation();
-					// The textarea disappears on completion; retain keyboard routing
-					// on the persistent circuit instead of falling back to the body.
-					const focusCircuit = () => event.currentTarget.closest<HTMLElement>('.logic-circuit')?.focus({ preventScroll: true });
-					if (event.key === 'Enter') { event.preventDefault(); confirmLabel(); focusCircuit(); }
-					if (event.key === 'Escape') { event.preventDefault(); cancelled.current = true; setLabelEditing(false); focusCircuit(); }
-				}} /> : <span className="logic-terminal-label">{node.label || '\u00a0'}</span>}
+				{editing && labelEditing ? labelField('logic-terminal-label-input') : <span className="logic-terminal-label">{node.label || '\u00a0'}</span>}
 			</div><svg className="logic-terminal-marker" viewBox={`0 0 ${size.width} 16`} style={{ position: 'absolute', top: terminalSize.markerTop, left: 0, width: size.width, height: 16 }} aria-hidden="true">
 				<g fill="none" stroke="currentColor" strokeWidth="1.6">
 					<path data-circuit-connector={node.type === 'input' ? 'out' : 'in-1'} d={node.type === 'input'

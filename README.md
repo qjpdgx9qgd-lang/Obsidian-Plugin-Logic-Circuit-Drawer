@@ -22,6 +22,7 @@ If a community installation shows unstyled controls or overlapping circuit objec
 - In Live Preview, the new block opens for editing without adding an extra blank line after it. Source mode shows the JSON instead of changing your note mode.
 - In Live Preview, double-click a finished circuit block, or select **Edit**, to open its inline editor.
 - Select a gate, **Input**, or **Output** in the toolbar, then click in the block. You can also drag the toolbar item into the diagram. Each action places one object.
+- Select **Box** in the toolbar to place a black box: a labelled square that stands in for a circuit you reuse. The dialog asks for its label and how many inputs and outputs it has (0–8 per side). For example, a full adder can be a box labelled **FA** with three inputs and two outputs. A black box connects, branches, moves, and deletes like any other object. Double-click a black box to edit its label, or select it and use the gear button to change the label or pin counts. Reducing a side is refused while a wire still uses a pin that would disappear.
 - Drag objects to move them on the 8-pixel grid. Gate centers, pins, and terminal markers can align exactly. The lower boundary grows and shrinks during movement or placement previews; the top stays fixed during editing. Drag between pins to connect them; the gesture works in either direction. Inputs accept one connection, while outputs can feed multiple targets.
 - A gate's output can connect back to its own incoming pin to draw feedback loops. The diagram still enforces one connection per incoming pin.
 - Double-click an Input or Output label to edit it. **Enter** or leaving the field confirms; **Esc** cancels. Gates have no labels.
@@ -82,7 +83,8 @@ For a community release, attach `main.js`, `manifest.json`, and `styles.css` as 
 ## Initial limitations
 
 - No simulation, truth tables, analog components, chips, or nested circuits.
-- Fixed gate orientation and input counts; only Input and Output have labels.
+- Black boxes are visual stand-ins only; they do not expand, simulate, or link to another circuit. Each side supports at most 8 pins.
+- Fixed gate orientation and input counts; only Input, Output, and black boxes have labels.
 - Stepped wires have no advanced obstacle avoidance or draggable elbows. In crowded diagrams they may cross symbols.
 - Large diagrams can become small in narrow panes. There is no internal scrolling or infinite canvas.
 - The circuit format supports up to 1,000 nodes and 5,000 wires, with positions between −10,000 and 10,000 model units on each axis. Larger or out-of-range data displays an inline error and preserves the original block.

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CircuitValidationError, connect, newCircuit, parseCircuit, pinsFor, serializeCircuit } from '../src/model/circuit';
+import { CircuitValidationError, connect, MAX_BLACKBOX_PINS, newCircuit, parseCircuit, pinsFor, serializeCircuit } from '../src/model/circuit';
 import type { CircuitData, CircuitEdge, CircuitNode, GateType } from '../src/model/types';
 
 const gateTypes: GateType[] = ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor'];
@@ -116,4 +116,26 @@ void test('schema and scale errors avoid echoing arbitrary source identifiers an
 	readable(() => parse({ ...data, schemaVersion: { id: missingId } }), /^Unsupported circuit schema version\. This plugin supports version 1\.$/);
 	readable(() => parse({ ...data, schemaVersion: 2 }), /schema version: 2/);
 	readable(() => parse({ ...data, view: { preferredScale: 0.1 } }), /scale must be between 25% and 300%/);
+});
+
+void test('black boxes validate labels, counts, and their pin references', () => {
+	const box: CircuitNode = { id: 'box', type: 'blackbox', label: 'FA', inputCount: 3, outputCount: 2, position: { x: 0, y: 0 } };
+	const data: CircuitData = { ...newCircuit(), nodes: [
+		{ id: 'a', type: 'input', label: 'A', position: { x: 0, y: 0 } },
+		box,
+		{ id: 'y', type: 'output', label: 'Y', position: { x: 160, y: 0 } },
+	] };
+	const connected = connect(connect(data, 'a', 'out', 'box', 'in-3'), 'box', 'out-2', 'y', 'in-1');
+	assert.deepEqual(parseCircuit(serializeCircuit(connected)), connected);
+	assert.deepEqual(pinsFor('blackbox', box), { inputs: ['in-1', 'in-2', 'in-3'], outputs: ['out-1', 'out-2'] });
+
+	const parse = (value: unknown): CircuitData => parseCircuit(JSON.stringify(value));
+	readable(() => parse({ ...data, nodes: [{ ...box, inputCount: undefined }] }), /must declare its input and output counts/);
+	readable(() => parse({ ...data, nodes: [{ ...box, label: 'x'.repeat(201) }] }), /label must be text/);
+	readable(() => parse({ ...data, nodes: [{ ...box, inputCount: -1 }] }), /input count must be a whole number/);
+	readable(() => parse({ ...data, nodes: [{ ...box, outputCount: 1.5 }] }), /output count must be a whole number/);
+	readable(() => parse({ ...data, nodes: [{ ...box, inputCount: MAX_BLACKBOX_PINS + 1 }] }), /whole number between 0 and/);
+	readable(() => parse({ ...data, nodes: [{ id: 'gate', type: 'and', position: { x: 0, y: 0 }, inputCount: 2 }] }), /only black boxes can declare/);
+	readable(() => parse({ ...data, edges: [wire('a', 'out', 'box', 'in-4')] }), /Connect an output pin to an input pin/);
+	readable(() => parse({ ...data, edges: [wire('box', 'out-3', 'y', 'in-1')] }), /Connect an output pin to an input pin/);
 });

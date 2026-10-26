@@ -117,6 +117,19 @@ const api = {
 		];
 		return show(circuit);
 	},
+	showBlackBoxFixture: () => {
+		const circuit = newCircuit();
+		circuit.nodes = [
+			terminalAtPin('bb-a', 'input', 'A', 72, 112),
+			{ id: 'bb-fa', type: 'blackbox', label: 'FA', inputCount: 3, outputCount: 2, position: { x: 208, y: 64 } },
+			terminalAtPin('bb-sum', 'output', 'Sum', 480, 112),
+		];
+		circuit.edges = [
+			{ id: 'bb-a-fa', sourceNodeId: 'bb-a', sourcePinId: 'out', targetNodeId: 'bb-fa', targetPinId: 'in-1' },
+			{ id: 'bb-fa-sum', sourceNodeId: 'bb-fa', sourcePinId: 'out-1', targetNodeId: 'bb-sum', targetPinId: 'in-1' },
+		];
+		return show(circuit);
+	},
 	showFeedbackFixture: () => {
 		const circuit = newCircuit();
 		circuit.nodes = [

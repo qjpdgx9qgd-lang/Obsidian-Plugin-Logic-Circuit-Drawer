@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { branchEdge, connect, deleteElements, MAX_EDGES, MAX_NODES, MAX_POSITION, newCircuit, parseCircuit, pinsFor, serializeCircuit } from '../src/model/circuit';
+import { branchEdge, connect, deleteElements, MAX_BLACKBOX_PINS, MAX_EDGES, MAX_NODES, MAX_POSITION, newCircuit, parseCircuit, pinsFor, reconfigureBlackbox, serializeCircuit } from '../src/model/circuit';
 import { CircuitHistory } from '../src/model/history';
 import type { CircuitData, CircuitEdge, CircuitNode } from '../src/model/types';
 
@@ -186,7 +186,7 @@ void test('parser rejects malformed or unsupported data rather than replacing it
 	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), schemaVersion: 2 })), /version: 2/);
 	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), extra: true })), /unsupported field/);
 	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), view: { preferredScale: 0 } })), /scale/);
-	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), nodes: [{ ...base().nodes[2], label: 'Gate label' }] })), /only Input and Output/);
+	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), nodes: [{ ...base().nodes[2], label: 'Gate label' }] })), /only terminal and black box/);
 	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), nodes: [{ ...base().nodes[0], type: 'chip' }] })), /unsupported type/);
 	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), nodes: [base().nodes[0], base().nodes[0]] })), /Node identifiers must be unique/);
 	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), nodes: [{ ...base().nodes[0], position: { x: '5', y: 0 } }] })), /finite/);
@@ -214,4 +214,50 @@ void test('oversized node and wire arrays are rejected before layout or graph pr
 	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), nodes })), /too many nodes.*1000/);
 	const edges = Array.from({ length: MAX_EDGES + 1 }, (_, index): CircuitEdge => ({ id: `wire-${index}`, sourceNodeId: 'a', sourcePinId: 'out', targetNodeId: 'gate', targetPinId: 'in-1' }));
 	assert.throws(() => parseCircuit(JSON.stringify({ ...base(), edges })), /too many wires.*5000/);
+});
+
+function blackBox(): CircuitData {
+	return { ...newCircuit(), nodes: [
+		{ id: 'a', type: 'input', label: 'A', position: { x: 0, y: 0 } },
+		{ id: 'b', type: 'input', label: 'B', position: { x: 0, y: 64 } },
+		{ id: 'fa', type: 'blackbox', label: 'FA', inputCount: 3, outputCount: 2, position: { x: 200, y: 0 } },
+		{ id: 'gate', type: 'or', position: { x: 200, y: 120 } },
+		{ id: 'cout', type: 'output', label: 'Cout', position: { x: 400, y: 0 } },
+	] };
+}
+
+void test('black boxes expose the requested number of input and output pins', () => {
+	assert.deepEqual(pinsFor('blackbox', { inputCount: 3, outputCount: 2 }), {
+		inputs: ['in-1', 'in-2', 'in-3'], outputs: ['out-1', 'out-2'],
+	});
+	assert.deepEqual(pinsFor('blackbox', { inputCount: 1, outputCount: 1 }), { inputs: ['in-1'], outputs: ['out-1'] });
+	assert.deepEqual(pinsFor('blackbox', { inputCount: 0, outputCount: 0 }), { inputs: [], outputs: [] });
+	for (const type of ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor'] as const) {
+		assert.deepEqual(pinsFor(type), { inputs: type === 'not' ? ['in-1'] : ['in-1', 'in-2'], outputs: ['out'] });
+	}
+});
+
+void test('black box pins connect, fan out, branch, delete, and survive source reload', () => {
+	let data = connect(blackBox(), 'a', 'out', 'fa', 'in-1');
+	data = connect(data, 'b', 'out', 'fa', 'in-2');
+	data = connect(data, 'fa', 'out-1', 'cout', 'in-1');
+	data = connect(data, 'a', 'out', 'fa', 'in-3');
+	assert.equal(data.edges.length, 4);
+	const branched = branchEdge(data, data.edges.find(edge => edge.targetNodeId === 'fa' && edge.targetPinId === 'in-3')!.id,
+		{ x: 100, y: 32 }, 'gate', 'in-1');
+	assert.ok(branched.edges.some(edge => edge.targetNodeId === 'gate' && edge.targetPinId === 'in-1'));
+	assert.deepEqual(parseCircuit(serializeCircuit(branched)), branched);
+	const removed = deleteElements(branched, ['fa'], []);
+	assert.ok(!removed.nodes.some(node => node.id === 'fa'));
+	assert.ok(removed.edges.every(edge => edge.sourceNodeId !== 'fa' && edge.targetNodeId !== 'fa'));
+});
+
+void test('black box pin counts can change when no wire would be orphaned', () => {
+	const data = connect(blackBox(), 'a', 'out', 'fa', 'in-1');
+	const renamed = reconfigureBlackbox(data, 'fa', { label: 'Adder', inputCount: 3, outputCount: 2 });
+	assert.equal(renamed.nodes.find(node => node.id === 'fa')?.label, 'Adder');
+	assert.deepEqual(parseCircuit(serializeCircuit(renamed)), renamed);
+	assert.throws(() => reconfigureBlackbox(data, 'fa', { label: 'FA', inputCount: 0, outputCount: 2 }), /Disconnect wires/);
+	assert.throws(() => reconfigureBlackbox(data, 'fa', { label: 'FA', inputCount: 1, outputCount: MAX_BLACKBOX_PINS + 1 }), /whole number/);
+	assert.throws(() => reconfigureBlackbox(data, 'missing', { label: 'FA', inputCount: 1, outputCount: 1 }), /no longer available/);
 });

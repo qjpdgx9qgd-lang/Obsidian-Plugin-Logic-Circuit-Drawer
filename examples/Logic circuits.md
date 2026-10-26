@@ -182,3 +182,32 @@ The filled junction sends the same output to Y and Z. Move the gate or junction,
 ```
 
 Both circuits save independently.
+
+## A reusable full adder as a black box
+
+The square stands in for a circuit drawn elsewhere. It exposes three inputs and two outputs, so it can be wired like a single object.
+
+```logic-circuit
+{
+  "schemaVersion": 1,
+  "circuitId": "example-black-box-full-adder",
+  "nodes": [
+    { "id": "a", "type": "input", "position": { "x": 40, "y": 64 }, "label": "A" },
+    { "id": "b", "type": "input", "position": { "x": 40, "y": 144 }, "label": "B" },
+    { "id": "cin", "type": "input", "position": { "x": 40, "y": 224 }, "label": "Cin" },
+    { "id": "fa", "type": "blackbox", "position": { "x": 240, "y": 96 }, "label": "FA", "inputCount": 3, "outputCount": 2 },
+    { "id": "sum", "type": "output", "position": { "x": 440, "y": 112 }, "label": "Sum" },
+    { "id": "cout", "type": "output", "position": { "x": 440, "y": 208 }, "label": "Cout" }
+  ],
+  "edges": [
+    { "id": "a-fa", "sourceNodeId": "a", "sourcePinId": "out", "targetNodeId": "fa", "targetPinId": "in-1" },
+    { "id": "b-fa", "sourceNodeId": "b", "sourcePinId": "out", "targetNodeId": "fa", "targetPinId": "in-2" },
+    { "id": "cin-fa", "sourceNodeId": "cin", "sourcePinId": "out", "targetNodeId": "fa", "targetPinId": "in-3" },
+    { "id": "fa-sum", "sourceNodeId": "fa", "sourcePinId": "out-1", "targetNodeId": "sum", "targetPinId": "in-1" },
+    { "id": "fa-cout", "sourceNodeId": "fa", "sourcePinId": "out-2", "targetNodeId": "cout", "targetPinId": "in-1" }
+  ],
+  "view": {
+    "preferredScale": 1
+  }
+}
+```

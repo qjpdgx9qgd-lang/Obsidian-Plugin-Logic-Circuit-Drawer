@@ -14,6 +14,7 @@ Supported objects:
 
 - AND, OR, NOT, NAND, NOR, XOR, and XNOR gates.
 - Dedicated Input and Output terminals with editable labels.
+- Black boxes: labelled squares with a configurable number of inputs (0–8) and outputs (0–8), used to stand in for a circuit that appears repeatedly.
 - Explicit junctions for branching in the middle of wires.
 - Plain, unlabeled wires.
 
@@ -130,6 +131,7 @@ Gates face left-to-right, with incoming pins on the left and outgoing pins on th
 | --- | --- | --- | --- |
 | Input | None | One | Yes |
 | Output | One | None | Yes |
+| Black box | Configurable, 0–8 | Configurable, 0–8 | Yes |
 | NOT | One | One | No |
 | AND, OR, NAND, NOR, XOR, XNOR | Two | One | No |
 | Junction | One | One logical output that permits multiple branches | No |

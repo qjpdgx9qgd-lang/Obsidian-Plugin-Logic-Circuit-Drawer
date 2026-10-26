@@ -1,6 +1,6 @@
 import type { CircuitData, CircuitEdge, CircuitNode, Position } from './types';
 import { CircuitValidationError, pinsFor, validateCircuit } from './validation';
-export { CircuitValidationError, pinsFor, MIN_SCALE, MAX_SCALE, MAX_LABEL_LENGTH, MAX_POSITION, MAX_NODES, MAX_EDGES } from './validation';
+export { CircuitValidationError, pinsFor, MIN_SCALE, MAX_SCALE, MAX_LABEL_LENGTH, MAX_BLACKBOX_PINS, MAX_POSITION, MAX_NODES, MAX_EDGES } from './validation';
 
 export function createId(): string {
 	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -24,10 +24,27 @@ export function connect(data: CircuitData, sourceNodeId: string, sourcePinId: st
 	const source = data.nodes.find(node => node.id === sourceNodeId);
 	const target = data.nodes.find(node => node.id === targetNodeId);
 	if (!source || !target) throw new CircuitValidationError('This connection is no longer available.');
-	if (pinsFor(source.type).inputs.includes(sourcePinId) && pinsFor(target.type).outputs.includes(targetPinId)) {
+	if (pinsFor(source.type, source).inputs.includes(sourcePinId) && pinsFor(target.type, target).outputs.includes(targetPinId)) {
 		return connect(data, targetNodeId, targetPinId, sourceNodeId, sourcePinId);
 	}
 	const result = { ...data, edges: [...data.edges, { id: createId(), sourceNodeId, sourcePinId, targetNodeId, targetPinId }] };
+	return validateCircuit(result);
+}
+
+/** Change a black box's caption and pin counts without silently dropping wires. */
+export function reconfigureBlackbox(data: CircuitData, nodeId: string,
+	config: { label: string; inputCount: number; outputCount: number }): CircuitData {
+	const node = data.nodes.find(item => item.id === nodeId);
+	if (!node || node.type !== 'blackbox') throw new CircuitValidationError('This black box is no longer available.');
+	const next = pinsFor('blackbox', config);
+	const attached = data.edges.some(edge =>
+		(edge.sourceNodeId === nodeId && !next.outputs.includes(edge.sourcePinId))
+		|| (edge.targetNodeId === nodeId && !next.inputs.includes(edge.targetPinId)));
+	if (attached) throw new CircuitValidationError('Disconnect wires from pins that would be removed before changing this black box.');
+	const result: CircuitData = {
+		...data,
+		nodes: data.nodes.map(item => item.id === nodeId ? { ...item, label: config.label, inputCount: config.inputCount, outputCount: config.outputCount } : item),
+	};
 	return validateCircuit(result);
 }
 

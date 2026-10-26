@@ -4,7 +4,8 @@ import { GateSymbol } from './GateSymbol';
 import { AccessibleButton, useAccessibleLabel } from './accessibility';
 
 export const PLACEMENT_MIME = 'application/x-obsidian-logic-node';
-const TOOLS: NodeType[] = ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor', 'input', 'output'];
+const TOOLS: NodeType[] = ['and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor', 'blackbox', 'input', 'output'];
+const NAMES: Partial<Record<NodeType, string>> = { blackbox: 'Black box', input: 'Input', output: 'Output' };
 export function CircuitToolbar({ tool, select, canUndo, canRedo, undo, redo, canDelete, remove, done, busy, locked }: {
 	tool: NodeType | null; select: (type: NodeType | null) => void;
 	canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void;
@@ -18,8 +19,10 @@ export function CircuitToolbar({ tool, select, canUndo, canRedo, undo, redo, can
 	return <div className="logic-toolbar" role="toolbar" aria-labelledby={name.id}>
 		{name.label}
 		<div className="logic-tools">
-			{TOOLS.map(type => <AccessibleButton key={type} type="button" className={`logic-tool${tool === type ? ' is-active' : ''}`} label={`Place ${type === 'input' ? 'Input' : type === 'output' ? 'Output' : type.toUpperCase()}`} aria-pressed={tool === type} title={type === 'input' ? 'Input' : type === 'output' ? 'Output' : type.toUpperCase()} disabled={locked} draggable={!locked} onDragStart={event => drag(event, type)} onDragEnd={() => select(null)} onClick={() => select(tool === type ? null : type)}>
-				{type === 'input' || type === 'output' ? <span className="logic-terminal-tool">{type === 'input' ? 'Input' : 'Output'}<span aria-hidden="true">{type === 'input' ? '→' : '←'}</span></span> : <><GateSymbol type={type} /><span>{type.toUpperCase()}</span></>}
+			{TOOLS.map(type => <AccessibleButton key={type} type="button" className={`logic-tool${tool === type ? ' is-active' : ''}`} label={`Place ${NAMES[type] ?? type.toUpperCase()}`} aria-pressed={tool === type} title={NAMES[type] ?? type.toUpperCase()} disabled={locked} draggable={!locked} onDragStart={event => drag(event, type)} onDragEnd={() => select(null)} onClick={() => select(tool === type ? null : type)}>
+				{type === 'input' || type === 'output' ? <span className="logic-terminal-tool">{type === 'input' ? 'Input' : 'Output'}<span aria-hidden="true">{type === 'input' ? '→' : '←'}</span></span>
+					: type === 'blackbox' ? <><svg viewBox="0 0 36 23" width="36" height="23" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="5.5" y="4.5" width="25" height="14" rx="1" /><path d="M1 8h4.5M1 15h4.5M30.5 8H35M30.5 15H35" /></svg><span>Box</span></>
+					: <><GateSymbol type={type} /><span>{type.toUpperCase()}</span></>}
 			</AccessibleButton>)}
 		</div>
 		<div className="logic-history-tools">
